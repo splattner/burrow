@@ -1,0 +1,27 @@
+# Binary output
+bin/
+
+# Go build cache and test cache
+*.test
+*.out
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Environment / secrets
+.env
+*.pem
+*.key
+*.jwt
+
+# Editor
+.vscode/settings.json
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# E2e test logs
+/tmp/krt-e2e-*.log

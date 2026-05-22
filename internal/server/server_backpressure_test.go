@@ -4,10 +4,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sebastian/k8s-reverse-tunnel/internal/config"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/logging"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/protocol"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/tunnel"
+	"github.com/splattner/k8s-reverse-tunnel/internal/config"
+	"github.com/splattner/k8s-reverse-tunnel/internal/logging"
+	"github.com/splattner/k8s-reverse-tunnel/internal/protocol"
+	"github.com/splattner/k8s-reverse-tunnel/internal/tunnel"
 )
 
 func TestHandleWireFrameBackpressureClosesStreamAndCountsDrop(t *testing.T) {

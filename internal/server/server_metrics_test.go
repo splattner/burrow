@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sebastian/k8s-reverse-tunnel/internal/config"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/logging"
+	"github.com/splattner/k8s-reverse-tunnel/internal/config"
+	"github.com/splattner/k8s-reverse-tunnel/internal/logging"
 )
 
 func TestHandleMetricsExposesCurrentCounters(t *testing.T) {

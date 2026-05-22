@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/auth"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/config"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/kube"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/metrics"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/protocol"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/tunnel"
 	"github.com/sirupsen/logrus"
+	"github.com/splattner/k8s-reverse-tunnel/internal/auth"
+	"github.com/splattner/k8s-reverse-tunnel/internal/config"
+	"github.com/splattner/k8s-reverse-tunnel/internal/kube"
+	"github.com/splattner/k8s-reverse-tunnel/internal/metrics"
+	"github.com/splattner/k8s-reverse-tunnel/internal/protocol"
+	"github.com/splattner/k8s-reverse-tunnel/internal/tunnel"
 )
 
 var upgrader = websocket.Upgrader{
@@ -108,7 +108,9 @@ func (s *Server) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 
 	var bridgeLn net.Listener
 	if s.cfg.BridgeAddr != "" {
@@ -116,7 +118,9 @@ func (s *Server) Run(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("bridge listen: %w", err)
 		}
-		defer bridgeLn.Close()
+		defer func() {
+			_ = bridgeLn.Close()
+		}()
 		s.setBridgeAddr(bridgeLn.Addr().String())
 	}
 
@@ -291,7 +295,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) readPump(conn *websocket.Conn) {
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	for {
 		_, payload, err := conn.ReadMessage()
@@ -317,7 +323,9 @@ func (s *Server) readPump(conn *websocket.Conn) {
 }
 
 func (s *Server) writePump(conn *websocket.Conn, send <-chan []byte) {
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	for msg := range send {
 		if err := conn.WriteMessage(websocket.BinaryMessage, msg); err != nil {
@@ -491,12 +499,12 @@ func (s *Server) runBridgeListener(ctx context.Context, ln net.Listener) {
 			if ctx.Err() != nil {
 				return
 			}
-			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+			if errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection") {
+				return
+			}
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
 				time.Sleep(50 * time.Millisecond)
 				continue
-			}
-			if strings.Contains(err.Error(), "use of closed network connection") {
-				return
 			}
 			s.log.Errorf("bridge accept error: %v", err)
 			return
@@ -507,7 +515,9 @@ func (s *Server) runBridgeListener(ctx context.Context, ln net.Listener) {
 }
 
 func (s *Server) handleBridgeConn(conn net.Conn) {
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	streamID := s.streamSeq.Add(1)
 	stream, err := s.OpenStream(streamID, s.activeClientTarget())
@@ -772,11 +782,6 @@ func (s *Server) markActiveClientDisconnected() {
 	if err := s.kube.MarkClientDisconnected(context.Background(), clientID); err != nil {
 		s.log.Errorf("mark client disconnected failed client=%q: %v", clientID, err)
 	}
-}
-
-func (s *Server) isAuthorized(r *http.Request) bool {
-	_, err := s.authenticateRequest(r)
-	return err == nil
 }
 
 func (s *Server) authenticateRequest(r *http.Request) (auth.Identity, error) {

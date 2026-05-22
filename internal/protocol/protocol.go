@@ -7,10 +7,9 @@ import (
 	"fmt"
 )
 
-const (
-	Version1   byte = 1
-	headerSize      = 14
-)
+const Version1 byte = 1
+
+const headerSize = 14
 
 var (
 	ErrFrameTooShort      = errors.New("frame too short")

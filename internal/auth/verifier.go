@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/config"
+	"github.com/splattner/k8s-reverse-tunnel/internal/config"
 )
 
 type Verifier struct {
@@ -278,7 +278,9 @@ func (j *jwksVerifier) refresh(expectedAlg string) error {
 	if err != nil {
 		return fmt.Errorf("fetch JWKS: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("fetch JWKS returned status %d", resp.StatusCode)

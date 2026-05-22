@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/config"
+	"github.com/splattner/k8s-reverse-tunnel/internal/config"
 )
 
 func TestVerifierJWTRejectsMissingBearer(t *testing.T) {

@@ -1,6 +1,8 @@
-module github.com/sebastian/k8s-reverse-tunnel
+module github.com/splattner/k8s-reverse-tunnel
 
-go 1.22.0
+go 1.25.0
+
+toolchain go1.25.10
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -53,7 +55,7 @@ require (
 	go.uber.org/multierr v1.9.0 // indirect
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9 // indirect
 	golang.org/x/net v0.26.0 // indirect
-	golang.org/x/oauth2 v0.21.0 // indirect
+	golang.org/x/oauth2 v0.27.0 // indirect
 	golang.org/x/sys v0.21.0 // indirect
 	golang.org/x/term v0.21.0 // indirect
 	golang.org/x/text v0.16.0 // indirect

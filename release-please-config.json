@@ -1,0 +1,10 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "go",
+      "package-name": "k8s-reverse-tunnel",
+      "include-component-in-tag": false
+    }
+  }
+}
+

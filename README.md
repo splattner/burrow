@@ -54,7 +54,7 @@ The server optionally manages Kubernetes `Service` objects automatically — one
 
 ## Quick start (dev)
 
-Requires Go 1.22+ and Python 3 (used by the token-minting helper script).
+Requires Go 1.25+ and Python 3 (used by the token-minting helper script).
 
 **1. Start the server with a shared HS256 secret:**
 
@@ -241,7 +241,7 @@ When using `--bearer-token-file`, the client reads the file on every reconnect. 
 
 ## Building from source
 
-Requires Go 1.22+.
+Requires Go 1.25+.
 
 ```bash
 # Build the binary

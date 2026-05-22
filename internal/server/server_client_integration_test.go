@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	clientpkg "github.com/sebastian/k8s-reverse-tunnel/internal/client"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/config"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/logging"
-	serverpkg "github.com/sebastian/k8s-reverse-tunnel/internal/server"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/tunnel"
+	clientpkg "github.com/splattner/k8s-reverse-tunnel/internal/client"
+	"github.com/splattner/k8s-reverse-tunnel/internal/config"
+	"github.com/splattner/k8s-reverse-tunnel/internal/logging"
+	serverpkg "github.com/splattner/k8s-reverse-tunnel/internal/server"
+	"github.com/splattner/k8s-reverse-tunnel/internal/tunnel"
 )
 
 func TestServerClientRelayWithLocalEcho(t *testing.T) {
@@ -177,7 +177,9 @@ func TestServerBridgeListenerRelaysToClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial bridge listener: %v", err)
 	}
-	defer podConn.Close()
+	defer func() {
+		_ = podConn.Close()
+	}()
 
 	want := []byte("pod-to-client-echo")
 	if _, err := podConn.Write(want); err != nil {
@@ -427,7 +429,9 @@ func startTCPEcho(t *testing.T) (string, func()) {
 			}
 
 			go func(c net.Conn) {
-				defer c.Close()
+				defer func() {
+					_ = c.Close()
+				}()
 				_, _ = io.Copy(c, c)
 			}(conn)
 		}

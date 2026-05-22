@@ -14,7 +14,7 @@ The server optionally auto-creates and cleans up Kubernetes `Service` objects fo
 
 ## Module and language
 
-- Module: `github.com/sebastian/k8s-reverse-tunnel`
+- Module: `github.com/splattner/k8s-reverse-tunnel`
 - Go 1.22
 - All code is under `cmd/` (entrypoints) and `internal/` (library packages)
 

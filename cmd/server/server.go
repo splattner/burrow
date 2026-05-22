@@ -3,12 +3,12 @@ package server
 import (
 	"context"
 
-	"github.com/sebastian/k8s-reverse-tunnel/internal/config"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/logging"
-	serverimpl "github.com/sebastian/k8s-reverse-tunnel/internal/server"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/splattner/k8s-reverse-tunnel/internal/config"
+	"github.com/splattner/k8s-reverse-tunnel/internal/logging"
+	serverimpl "github.com/splattner/k8s-reverse-tunnel/internal/server"
 )
 
 func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {

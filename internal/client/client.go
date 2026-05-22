@@ -17,10 +17,10 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
 
-	"github.com/sebastian/k8s-reverse-tunnel/internal/bridge"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/config"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/protocol"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/tunnel"
+	"github.com/splattner/k8s-reverse-tunnel/internal/bridge"
+	"github.com/splattner/k8s-reverse-tunnel/internal/config"
+	"github.com/splattner/k8s-reverse-tunnel/internal/protocol"
+	"github.com/splattner/k8s-reverse-tunnel/internal/tunnel"
 )
 
 type Client struct {
@@ -114,7 +114,9 @@ func (c *Client) runSession(ctx context.Context) error {
 		}
 		return fmt.Errorf("dial websocket: %w", err)
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	send := make(chan []byte, 128)
 	c.setSendChan(send)
@@ -193,11 +195,13 @@ func tokenRefreshDeadline(rawToken string, refreshWindow time.Duration) (time.Ti
 	if claims.ExpiresAt == nil {
 		return time.Time{}, false, nil
 	}
-	return claims.ExpiresAt.Time.Add(-refreshWindow), true, nil
+	return claims.ExpiresAt.Add(-refreshWindow), true, nil
 }
 
 func classifyUnauthorizedResponse(resp *http.Response) error {
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	msg := strings.TrimSpace(string(body))
 	if msg == "" {

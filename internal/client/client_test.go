@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sebastian/k8s-reverse-tunnel/internal/config"
-	"github.com/sebastian/k8s-reverse-tunnel/internal/logging"
+	"github.com/splattner/k8s-reverse-tunnel/internal/config"
+	"github.com/splattner/k8s-reverse-tunnel/internal/logging"
 )
 
 func TestOpenLocalConnIsIdempotentPerStreamID(t *testing.T) {
@@ -15,7 +15,9 @@ func TestOpenLocalConnIsIdempotentPerStreamID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen test target: %v", err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 
 	var accepted atomic.Int64
 	done := make(chan struct{})
@@ -28,7 +30,9 @@ func TestOpenLocalConnIsIdempotentPerStreamID(t *testing.T) {
 			}
 			accepted.Add(1)
 			go func(c net.Conn) {
-				defer c.Close()
+				defer func() {
+					_ = c.Close()
+				}()
 				_ = c.SetDeadline(time.Now().Add(100 * time.Millisecond))
 				buf := make([]byte, 1)
 				_, _ = c.Read(buf)

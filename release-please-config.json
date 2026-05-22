@@ -2,7 +2,7 @@
   "packages": {
     ".": {
       "release-type": "go",
-      "package-name": "k8s-reverse-tunnel",
+      "package-name": "burrow",
       "include-component-in-tag": false
     }
   }

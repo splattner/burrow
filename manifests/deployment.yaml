@@ -1,44 +1,44 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: krt-server
+  name: burrow-server
   namespace: default
   labels:
-    app: krt-server
+    app: burrow-server
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: krt-server
+      app: burrow-server
   template:
     metadata:
       labels:
-        app: krt-server
+        app: burrow-server
     spec:
-      serviceAccountName: krt-server
+      serviceAccountName: burrow-server
       containers:
         - name: server
-          image: ghcr.io/example/k8s-reverse-tunnel:latest
+          image: ghcr.io/example/burrow:latest
           imagePullPolicy: IfNotPresent
           args: ["server"]
           env:
-            - name: KRT_JWT_ALG
+            - name: BURROW_JWT_ALG
               value: "HS256"
-            - name: KRT_JWT_HMAC_SECRET
+            - name: BURROW_JWT_HMAC_SECRET
               value: "change-me"
-            - name: KRT_JWT_AUDIENCE
-              value: "krt-server"
-            - name: KRT_JWT_ISSUER
+            - name: BURROW_JWT_AUDIENCE
+              value: "burrow-server"
+            - name: BURROW_JWT_ISSUER
               value: "dev-local"
-            - name: KRT_SERVER_ADDR
+            - name: BURROW_SERVER_ADDR
               value: ":8080"
-            - name: KRT_BRIDGE_ADDR
+            - name: BURROW_BRIDGE_ADDR
               value: ":1111"
-            - name: KRT_NAMESPACE
+            - name: BURROW_NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            - name: KRT_LOG_LEVEL
+            - name: BURROW_LOG_LEVEL
               value: info
           ports:
             - name: http

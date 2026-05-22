@@ -4,7 +4,7 @@ This document is for coding agents and AI assistants. It describes the codebase,
 
 ## What this project is
 
-A single Go binary (`k8s-reverse-tunnel`) with two runtime modes — `server` and `client` — that together create a reverse WebSocket tunnel. The client runs outside a Kubernetes cluster and dials outbound to the server running inside it. Traffic from pods reaches an outside service through that persistent connection.
+A single Go binary (`burrow`) with two runtime modes — `server` and `client` — that together create a reverse WebSocket tunnel. The client runs outside a Kubernetes cluster and dials outbound to the server running inside it. Traffic from pods reaches an outside service through that persistent connection.
 
 ```
 Pod → bridge TCP port → server → WebSocket stream → client → local TCP service
@@ -14,7 +14,7 @@ The server optionally auto-creates and cleans up Kubernetes `Service` objects fo
 
 ## Module and language
 
-- Module: `github.com/splattner/k8s-reverse-tunnel`
+- Module: `github.com/splattner/burrow`
 - Go 1.22
 - All code is under `cmd/` (entrypoints) and `internal/` (library packages)
 
@@ -58,9 +58,9 @@ test/e2e/     smoke.sh: boots echo + server + client locally, asserts full data 
 `LoadFromViper(v)` populates it. `ValidateServer(cfg)` / `ValidateClient(cfg)` enforce mode-specific required fields — these are called in the subcommand `RunE`, not in `LoadFromViper`.
 
 **Viper binding:**
-- Env prefix: `KRT_`
+- Env prefix: `BURROW_`
 - `AutomaticEnv()` is on
-- Key separator in env vars: `-` → `_` (e.g. `jwt-hmac-secret` → `KRT_JWT_HMAC_SECRET`)
+- Key separator in env vars: `-` → `_` (e.g. `jwt-hmac-secret` → `BURROW_JWT_HMAC_SECRET`)
 - All flags are bound via `v.BindPFlag(key, flags.Lookup(key))` in the subcommand constructor
 - Precedence: CLI flag > env var > default
 
@@ -129,18 +129,18 @@ Log level conventions used in the codebase:
 ## Build and run commands
 
 ```bash
-make build        # produces bin/k8s-reverse-tunnel
+make build        # produces bin/burrow
 make test         # go test ./...
 make e2e-smoke    # local end-to-end smoke test
 
-make run-server-jwt-dev JWT_HMAC_SECRET=dev-secret JWT_AUDIENCE=krt-server JWT_ISSUER=dev-local
+make run-server-jwt-dev JWT_HMAC_SECRET=dev-secret JWT_AUDIENCE=burrow-server JWT_ISSUER=dev-local
 make run-client-jwt-dev CLIENT_ID=client-a LOCAL_TARGET=127.0.0.1:5432
 
-make run-server JWKS_URL=https://idp.example/.well-known/jwks.json JWT_AUDIENCE=krt-server
+make run-server JWKS_URL=https://idp.example/.well-known/jwks.json JWT_AUDIENCE=burrow-server
 make run-client BEARER_TOKEN="$JWT" CLIENT_ID=client-a LOCAL_TARGET=127.0.0.1:5432
 ```
 
-Makefile variables mirror flag names without the `KRT_` prefix (e.g. `JWT_HMAC_SECRET`, `BEARER_TOKEN`, `CLIENT_ID`).
+Makefile variables mirror flag names without the `BURROW_` prefix (e.g. `JWT_HMAC_SECRET`, `BEARER_TOKEN`, `CLIENT_ID`).
 
 ## Current state and known scope
 
@@ -168,6 +168,6 @@ Makefile variables mirror flag names without the `KRT_` prefix (e.g. `JWT_HMAC_S
 - **Do not add a custom logger wrapper** — use `*logrus.Logger` directly
 - **Do not call `LoadFromEnv` in tests** — construct `config.Config{}` literals
 - **Validation belongs in the subcommand `RunE`**, not in `LoadFromViper`
-- **Flag names use kebab-case**; env vars use `KRT_` + SCREAMING_SNAKE_CASE
+- **Flag names use kebab-case**; env vars use `BURROW_` + SCREAMING_SNAKE_CASE
 - **All new packages under `internal/`** — nothing exported at the module root
-- Error messages that reference configuration options must mention both the flag (`--flag-name`) and the env var (`KRT_FLAG_NAME`)
+- Error messages that reference configuration options must mention both the flag (`--flag-name`) and the env var (`BURROW_FLAG_NAME`)

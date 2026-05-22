@@ -24,4 +24,4 @@ go.work.sum
 Thumbs.db
 
 # E2e test logs
-/tmp/krt-e2e-*.log
+/tmp/burrow-e2e-*.log

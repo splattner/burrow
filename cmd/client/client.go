@@ -6,9 +6,9 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	clientimpl "github.com/splattner/k8s-reverse-tunnel/internal/client"
-	"github.com/splattner/k8s-reverse-tunnel/internal/config"
-	"github.com/splattner/k8s-reverse-tunnel/internal/logging"
+	clientimpl "github.com/splattner/burrow/internal/client"
+	"github.com/splattner/burrow/internal/config"
+	"github.com/splattner/burrow/internal/logging"
 )
 
 func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
@@ -16,13 +16,13 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 		Use:   "client",
 		Short: "Run the reverse tunnel client",
 		Example: `  # Client with inline bearer token
-  k8s-reverse-tunnel client --bearer-token "$JWT" --server-url ws://127.0.0.1:8080/ws --client-id client-a --local-target 127.0.0.1:3000
+  burrow client --bearer-token "$JWT" --server-url ws://127.0.0.1:8080/ws --client-id client-a --local-target 127.0.0.1:3000
 
   # Client with rotating token file
-  k8s-reverse-tunnel client --bearer-token-file /var/run/secrets/krt/token.jwt --server-url wss://krt.example/ws --client-id edge-a --local-target 127.0.0.1:3000
+  burrow client --bearer-token-file /var/run/secrets/burrow/token.jwt --server-url wss://burrow.example/ws --client-id edge-a --local-target 127.0.0.1:3000
 
   # Equivalent with environment variables
-  KRT_BEARER_TOKEN_FILE=/var/run/secrets/krt/token.jwt KRT_SERVER_URL=wss://krt.example/ws KRT_CLIENT_ID=edge-a KRT_LOCAL_TARGET=127.0.0.1:3000 k8s-reverse-tunnel client`,
+  BURROW_BEARER_TOKEN_FILE=/var/run/secrets/burrow/token.jwt BURROW_SERVER_URL=wss://burrow.example/ws BURROW_CLIENT_ID=edge-a BURROW_LOCAL_TARGET=127.0.0.1:3000 burrow client`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg, err := config.LoadFromViper(v)
 			if err != nil {
@@ -33,7 +33,7 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 			}
 
 			logger := logging.New(cfg.LogLevel)
-			logger.Info("starting k8s-reverse-tunnel client")
+			logger.Info("starting burrow client")
 
 			return Run(ctx, cfg, logger)
 		},

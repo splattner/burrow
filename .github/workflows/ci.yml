@@ -93,12 +93,12 @@ jobs:
         with:
           context: .
           load: true
-          tags: k8s-reverse-tunnel:${{ github.sha }}
+          tags: burrow:${{ github.sha }}
 
       - name: Scan image vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: k8s-reverse-tunnel:${{ github.sha }}
+          image-ref: burrow:${{ github.sha }}
           format: table
           severity: HIGH,CRITICAL
           scanners: vuln
@@ -110,7 +110,7 @@ jobs:
         if: always()
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: k8s-reverse-tunnel:${{ github.sha }}
+          image-ref: burrow:${{ github.sha }}
           format: sarif
           output: trivy-image-results.sarif
           severity: HIGH,CRITICAL

@@ -25,12 +25,12 @@ import (
 
 const (
 	maxServiceNameLen   = 63
-	serviceNamePrefix   = "krt-client-"
+	serviceNamePrefix   = "burrow-client-"
 	labelManagedByKey   = "app.kubernetes.io/managed-by"
-	labelManagedByValue = "k8s-reverse-tunnel"
-	labelClientIDKey    = "krt.dev/client-id"
-	annotationTargetKey = "krt.dev/target"
-	envEnableKubeAPI    = "KRT_ENABLE_KUBE_API"
+	labelManagedByValue = "burrow"
+	labelClientIDKey    = "burrow.dev/client-id"
+	annotationTargetKey = "burrow.dev/target"
+	envEnableKubeAPI    = "BURROW_ENABLE_KUBE_API"
 
 	defaultServicePortName = "tcp"
 	defaultServicePort     = 80
@@ -316,7 +316,7 @@ func buildService(record ServiceRecord) *corev1.Service {
 		Spec: corev1.ServiceSpec{
 			Type: corev1.ServiceTypeClusterIP,
 			Selector: map[string]string{
-				"app": "krt-server",
+				"app": "burrow-server",
 			},
 			Ports: []corev1.ServicePort{
 				{

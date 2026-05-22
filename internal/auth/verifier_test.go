@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/splattner/k8s-reverse-tunnel/internal/config"
+	"github.com/splattner/burrow/internal/config"
 )
 
 func TestVerifierJWTRejectsMissingBearer(t *testing.T) {
@@ -55,13 +55,13 @@ func TestVerifierJWT(t *testing.T) {
 		JWTAlg:        "HS256",
 		JWTHMACSecret: "jwt-secret",
 		JWTIssuer:     "https://issuer.example",
-		JWTAudience:   "krt-server",
+		JWTAudience:   "burrow-server",
 	})
 	if err != nil {
 		t.Fatalf("new verifier: %v", err)
 	}
 
-	token, err := signedHMACToken("jwt-secret", "https://issuer.example", "krt-server")
+	token, err := signedHMACToken("jwt-secret", "https://issuer.example", "burrow-server")
 	if err != nil {
 		t.Fatalf("build token: %v", err)
 	}
@@ -117,13 +117,13 @@ func TestVerifierJWTWithJWKS(t *testing.T) {
 	v, err := NewVerifier(config.Config{
 		JWTAlg:      "RS256",
 		JWKSURL:     jwksServer.URL,
-		JWTAudience: "krt-server",
+		JWTAudience: "burrow-server",
 	})
 	if err != nil {
 		t.Fatalf("new verifier: %v", err)
 	}
 
-	token, err := signedRSAToken(privateKey, "kid-1", "krt-server", "client-a")
+	token, err := signedRSAToken(privateKey, "kid-1", "burrow-server", "client-a")
 	if err != nil {
 		t.Fatalf("build token: %v", err)
 	}

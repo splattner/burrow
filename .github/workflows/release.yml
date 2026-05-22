@@ -43,7 +43,7 @@ jobs:
       - name: Set image name
         id: image
         run: |
-          image="${REGISTRY}/${GITHUB_REPOSITORY,,}"
+          image="${REGISTRY}/${GITHUB_REPOSITORY_OWNER,,}/burrow"
           echo "IMAGE_NAME=${image}" >> "$GITHUB_ENV"
           echo "image=${image}" >> "$GITHUB_OUTPUT"
 
@@ -117,20 +117,20 @@ jobs:
         with:
           image-ref: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
           format: cyclonedx
-          output: k8s-reverse-tunnel.sbom.cdx.json
+          output: burrow.sbom.cdx.json
           scanners: vuln
 
       - name: Upload SBOM artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: k8s-reverse-tunnel-sbom
-          path: k8s-reverse-tunnel.sbom.cdx.json
+          name: burrow-sbom
+          path: burrow.sbom.cdx.json
           if-no-files-found: error
 
       - name: Attach SBOM to GitHub release
         if: ${{ always() && needs.release-please.outputs.release_created == 'true' }}
-        run: gh release upload "${TAG_NAME}" k8s-reverse-tunnel.sbom.cdx.json --clobber
+        run: gh release upload "${TAG_NAME}" burrow.sbom.cdx.json --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ needs.release-please.outputs.tag_name }}

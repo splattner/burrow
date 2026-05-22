@@ -4,10 +4,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/splattner/k8s-reverse-tunnel/internal/config"
-	"github.com/splattner/k8s-reverse-tunnel/internal/logging"
-	"github.com/splattner/k8s-reverse-tunnel/internal/protocol"
-	"github.com/splattner/k8s-reverse-tunnel/internal/tunnel"
+	"github.com/splattner/burrow/internal/config"
+	"github.com/splattner/burrow/internal/logging"
+	"github.com/splattner/burrow/internal/protocol"
+	"github.com/splattner/burrow/internal/tunnel"
 )
 
 func TestHandleWireFrameBackpressureClosesStreamAndCountsDrop(t *testing.T) {

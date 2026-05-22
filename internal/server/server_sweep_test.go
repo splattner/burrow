@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/splattner/k8s-reverse-tunnel/internal/config"
-	"github.com/splattner/k8s-reverse-tunnel/internal/logging"
+	"github.com/splattner/burrow/internal/config"
+	"github.com/splattner/burrow/internal/logging"
 )
 
 func TestStaleSweepLoopRemovesDisconnectedClient(t *testing.T) {

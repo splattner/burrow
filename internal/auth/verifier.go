@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/splattner/k8s-reverse-tunnel/internal/config"
+	"github.com/splattner/burrow/internal/config"
 )
 
 type Verifier struct {
@@ -120,7 +120,7 @@ func newJWTVerifier(cfg config.Config) (*jwtVerifier, error) {
 
 	if strings.TrimSpace(cfg.JWKSURL) != "" {
 		if strings.HasPrefix(alg, "HS") {
-			return nil, fmt.Errorf("KRT_JWKS_URL cannot be used with symmetric JWT alg %q", alg)
+			return nil, fmt.Errorf("BURROW_JWKS_URL cannot be used with symmetric JWT alg %q", alg)
 		}
 		jv.jwks = &jwksVerifier{
 			url:             strings.TrimSpace(cfg.JWKSURL),
@@ -136,7 +136,7 @@ func newJWTVerifier(cfg config.Config) (*jwtVerifier, error) {
 		return jv, nil
 	}
 	if strings.TrimSpace(cfg.JWTPublicKeyFile) == "" {
-		return nil, fmt.Errorf("JWT verifier source missing: set KRT_JWT_HMAC_SECRET or KRT_JWT_PUBLIC_KEY_FILE or KRT_JWKS_URL")
+		return nil, fmt.Errorf("JWT verifier source missing: set BURROW_JWT_HMAC_SECRET or BURROW_JWT_PUBLIC_KEY_FILE or BURROW_JWKS_URL")
 	}
 
 	pem, err := os.ReadFile(cfg.JWTPublicKeyFile)

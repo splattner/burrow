@@ -37,7 +37,7 @@ type Config struct {
 
 func LoadFromEnv() (Config, error) {
 	v := viper.New()
-	v.SetEnvPrefix("KRT")
+	v.SetEnvPrefix("BURROW")
 	v.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	v.AutomaticEnv()
 
@@ -45,47 +45,47 @@ func LoadFromEnv() (Config, error) {
 }
 
 func LoadFromViper(v *viper.Viper) (Config, error) {
-	heartbeatInterval, err := parseDuration(v, "heartbeat-interval", "KRT_HEARTBEAT_INTERVAL", 10*time.Second)
+	heartbeatInterval, err := parseDuration(v, "heartbeat-interval", "BURROW_HEARTBEAT_INTERVAL", 10*time.Second)
 	if err != nil {
 		return Config{}, err
 	}
 
-	heartbeatTimeout, err := parseDuration(v, "heartbeat-timeout", "KRT_HEARTBEAT_TIMEOUT", 30*time.Second)
+	heartbeatTimeout, err := parseDuration(v, "heartbeat-timeout", "BURROW_HEARTBEAT_TIMEOUT", 30*time.Second)
 	if err != nil {
 		return Config{}, err
 	}
 
-	sweepInterval, err := parseDuration(v, "sweep-interval", "KRT_SWEEP_INTERVAL", 1*time.Minute)
+	sweepInterval, err := parseDuration(v, "sweep-interval", "BURROW_SWEEP_INTERVAL", 1*time.Minute)
 	if err != nil {
 		return Config{}, err
 	}
 
-	staleAge, err := parseDuration(v, "stale-service-age", "KRT_STALE_SERVICE_AGE", 10*time.Minute)
+	staleAge, err := parseDuration(v, "stale-service-age", "BURROW_STALE_SERVICE_AGE", 10*time.Minute)
 	if err != nil {
 		return Config{}, err
 	}
 
-	jwksRefresh, err := parseDuration(v, "jwks-refresh", "KRT_JWKS_REFRESH", 5*time.Minute)
+	jwksRefresh, err := parseDuration(v, "jwks-refresh", "BURROW_JWKS_REFRESH", 5*time.Minute)
 	if err != nil {
 		return Config{}, err
 	}
 
-	tokenRefreshWindow, err := parseDuration(v, "token-refresh-window", "KRT_TOKEN_REFRESH_WINDOW", 30*time.Second)
+	tokenRefreshWindow, err := parseDuration(v, "token-refresh-window", "BURROW_TOKEN_REFRESH_WINDOW", 30*time.Second)
 	if err != nil {
 		return Config{}, err
 	}
 
-	retryInterval, err := parseDuration(v, "client-retry-interval", "KRT_CLIENT_RETRY_INTERVAL", 1*time.Second)
+	retryInterval, err := parseDuration(v, "client-retry-interval", "BURROW_CLIENT_RETRY_INTERVAL", 1*time.Second)
 	if err != nil {
 		return Config{}, err
 	}
 
-	authRetryInterval, err := parseDuration(v, "client-auth-retry-interval", "KRT_CLIENT_AUTH_RETRY_INTERVAL", 5*time.Second)
+	authRetryInterval, err := parseDuration(v, "client-auth-retry-interval", "BURROW_CLIENT_AUTH_RETRY_INTERVAL", 5*time.Second)
 	if err != nil {
 		return Config{}, err
 	}
 
-	enableKubeAPI, err := parseOptionalBool(v, "enable-kube-api", "KRT_ENABLE_KUBE_API")
+	enableKubeAPI, err := parseOptionalBool(v, "enable-kube-api", "BURROW_ENABLE_KUBE_API")
 	if err != nil {
 		return Config{}, err
 	}
@@ -124,7 +124,7 @@ func LoadFromViper(v *viper.Viper) (Config, error) {
 // It must be called after LoadFromViper in the server subcommand.
 func ValidateServer(cfg Config) error {
 	if cfg.JWTHMACSecret == "" && cfg.JWTPublicKeyFile == "" && cfg.JWKSURL == "" {
-		return fmt.Errorf("server requires a JWT verifier source: set --jwt-hmac-secret / KRT_JWT_HMAC_SECRET, --jwt-public-key-file / KRT_JWT_PUBLIC_KEY_FILE, or --jwks-url / KRT_JWKS_URL")
+		return fmt.Errorf("server requires a JWT verifier source: set --jwt-hmac-secret / BURROW_JWT_HMAC_SECRET, --jwt-public-key-file / BURROW_JWT_PUBLIC_KEY_FILE, or --jwks-url / BURROW_JWKS_URL")
 	}
 	return nil
 }
@@ -134,16 +134,16 @@ func ValidateServer(cfg Config) error {
 func ValidateClient(cfg Config) error {
 	var errs []string
 	if cfg.BearerToken == "" && cfg.BearerTokenFile == "" {
-		errs = append(errs, "bearer token required: set --bearer-token / KRT_BEARER_TOKEN or --bearer-token-file / KRT_BEARER_TOKEN_FILE")
+		errs = append(errs, "bearer token required: set --bearer-token / BURROW_BEARER_TOKEN or --bearer-token-file / BURROW_BEARER_TOKEN_FILE")
 	}
 	if cfg.ServerURL == "" {
-		errs = append(errs, "server URL required: set --server-url / KRT_SERVER_URL")
+		errs = append(errs, "server URL required: set --server-url / BURROW_SERVER_URL")
 	}
 	if cfg.ClientID == "" {
-		errs = append(errs, "client ID required: set --client-id / KRT_CLIENT_ID")
+		errs = append(errs, "client ID required: set --client-id / BURROW_CLIENT_ID")
 	}
 	if cfg.LocalTarget == "" {
-		errs = append(errs, "local target required: set --local-target / KRT_LOCAL_TARGET")
+		errs = append(errs, "local target required: set --local-target / BURROW_LOCAL_TARGET")
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))

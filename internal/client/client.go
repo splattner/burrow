@@ -17,10 +17,10 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
 
-	"github.com/splattner/k8s-reverse-tunnel/internal/bridge"
-	"github.com/splattner/k8s-reverse-tunnel/internal/config"
-	"github.com/splattner/k8s-reverse-tunnel/internal/protocol"
-	"github.com/splattner/k8s-reverse-tunnel/internal/tunnel"
+	"github.com/splattner/burrow/internal/bridge"
+	"github.com/splattner/burrow/internal/config"
+	"github.com/splattner/burrow/internal/protocol"
+	"github.com/splattner/burrow/internal/tunnel"
 )
 
 type Client struct {
@@ -59,10 +59,10 @@ func New(cfg config.Config, logger *logrus.Logger) *Client {
 func (c *Client) Run(ctx context.Context) error {
 	c.log.Infof("client mode: server=%s client_id=%s target=%s", c.cfg.ServerURL, c.cfg.ClientID, c.cfg.LocalTarget)
 	if c.cfg.ServerURL == "" {
-		return fmt.Errorf("server URL is required (--server-url / KRT_SERVER_URL)")
+		return fmt.Errorf("server URL is required (--server-url / BURROW_SERVER_URL)")
 	}
 	if c.cfg.LocalTarget == "" {
-		return fmt.Errorf("local target is required (--local-target / KRT_LOCAL_TARGET)")
+		return fmt.Errorf("local target is required (--local-target / BURROW_LOCAL_TARGET)")
 	}
 
 	failures := 0
@@ -178,7 +178,7 @@ func (c *Client) resolveBearerToken() (string, error) {
 
 	token := strings.TrimSpace(c.cfg.BearerToken)
 	if token == "" {
-		return "", fmt.Errorf("missing bearer token: set KRT_BEARER_TOKEN or KRT_BEARER_TOKEN_FILE")
+		return "", fmt.Errorf("missing bearer token: set BURROW_BEARER_TOKEN or BURROW_BEARER_TOKEN_FILE")
 	}
 	return token, nil
 }

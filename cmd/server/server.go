@@ -6,9 +6,9 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"github.com/splattner/k8s-reverse-tunnel/internal/config"
-	"github.com/splattner/k8s-reverse-tunnel/internal/logging"
-	serverimpl "github.com/splattner/k8s-reverse-tunnel/internal/server"
+	"github.com/splattner/burrow/internal/config"
+	"github.com/splattner/burrow/internal/logging"
+	serverimpl "github.com/splattner/burrow/internal/server"
 )
 
 func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
@@ -16,13 +16,13 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 		Use:   "server",
 		Short: "Run the reverse tunnel server",
 		Example: `  # Local dev with HS256 JWT verification
-  k8s-reverse-tunnel server --jwt-hmac-secret dev-secret --server-addr :8080 --bridge-addr :1111
+  burrow server --jwt-hmac-secret dev-secret --server-addr :8080 --bridge-addr :1111
 
   # In-cluster style with explicit kube API mode
-  k8s-reverse-tunnel server --jwks-url https://issuer.example/.well-known/jwks.json --enable-kube-api true
+  burrow server --jwks-url https://issuer.example/.well-known/jwks.json --enable-kube-api true
 
   # Equivalent with environment variables
-  KRT_JWT_HMAC_SECRET=dev-secret KRT_SERVER_ADDR=:8080 KRT_BRIDGE_ADDR=:1111 k8s-reverse-tunnel server`,
+  BURROW_JWT_HMAC_SECRET=dev-secret BURROW_SERVER_ADDR=:8080 BURROW_BRIDGE_ADDR=:1111 burrow server`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg, err := config.LoadFromViper(v)
 			if err != nil {
@@ -33,7 +33,7 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 			}
 
 			logger := logging.New(cfg.LogLevel)
-			logger.Info("starting k8s-reverse-tunnel server")
+			logger.Info("starting burrow server")
 
 			return Run(ctx, cfg, logger)
 		},

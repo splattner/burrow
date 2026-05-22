@@ -186,7 +186,7 @@ kill_tree() {
 }
 
 JWT_SECRET="${JWT_SECRET:-dev-secret}"
-JWT_AUDIENCE="${JWT_AUDIENCE:-krt-server}"
+JWT_AUDIENCE="${JWT_AUDIENCE:-burrow-server}"
 JWT_ISSUER="${JWT_ISSUER:-dev-local}"
 SERVER_PORT="${SERVER_PORT:-$(reserve_port)}"
 BRIDGE_PORT="${BRIDGE_PORT:-$(reserve_port)}"
@@ -200,7 +200,7 @@ LOCAL_TARGET="127.0.0.1:${TARGET_PORT}"
 CLIENT_BEARER_TOKEN="$(mint_bearer_token "$CLIENT_ID" "$JWT_AUDIENCE" "$JWT_ISSUER" "$JWT_SECRET" 300)"
 
 echo "[e2e] starting local tcp echo target on ${LOCAL_TARGET}"
-python3 - <<PY >/tmp/krt-e2e-echo.log 2>&1 &
+python3 - <<PY >/tmp/burrow-e2e-echo.log 2>&1 &
 import socket
 import threading
 
@@ -237,14 +237,14 @@ wait_for_tcp 127.0.0.1 "$TARGET_PORT" 80 || {
 echo "[e2e] starting tunnel server on ${SERVER_ADDR} (bridge ${BRIDGE_ADDR})"
 (
   cd "$ROOT_DIR"
-  KRT_JWT_ALG="HS256" \
-  KRT_JWT_HMAC_SECRET="$JWT_SECRET" \
-  KRT_JWT_ISSUER="$JWT_ISSUER" \
-  KRT_JWT_AUDIENCE="$JWT_AUDIENCE" \
-  KRT_SERVER_ADDR="$SERVER_ADDR" \
-  KRT_BRIDGE_ADDR="$BRIDGE_ADDR" \
+  BURROW_JWT_ALG="HS256" \
+  BURROW_JWT_HMAC_SECRET="$JWT_SECRET" \
+  BURROW_JWT_ISSUER="$JWT_ISSUER" \
+  BURROW_JWT_AUDIENCE="$JWT_AUDIENCE" \
+  BURROW_SERVER_ADDR="$SERVER_ADDR" \
+  BURROW_BRIDGE_ADDR="$BRIDGE_ADDR" \
   exec go run ./cmd/root server
-) >/tmp/krt-e2e-server.log 2>&1 &
+) >/tmp/burrow-e2e-server.log 2>&1 &
 SERVER_PID=$!
 
 wait_for_http_ok "http://127.0.0.1:${SERVER_PORT}/healthz" 100 || {
@@ -255,16 +255,16 @@ wait_for_http_ok "http://127.0.0.1:${SERVER_PORT}/healthz" 100 || {
 echo "[e2e] starting tunnel client to ${SERVER_URL}"
 (
   cd "$ROOT_DIR"
-  KRT_JWT_ALG="HS256" \
-  KRT_JWT_HMAC_SECRET="$JWT_SECRET" \
-  KRT_JWT_ISSUER="$JWT_ISSUER" \
-  KRT_JWT_AUDIENCE="$JWT_AUDIENCE" \
-  KRT_BEARER_TOKEN="$CLIENT_BEARER_TOKEN" \
-  KRT_SERVER_URL="$SERVER_URL" \
-  KRT_CLIENT_ID="$CLIENT_ID" \
-  KRT_LOCAL_TARGET="$LOCAL_TARGET" \
+  BURROW_JWT_ALG="HS256" \
+  BURROW_JWT_HMAC_SECRET="$JWT_SECRET" \
+  BURROW_JWT_ISSUER="$JWT_ISSUER" \
+  BURROW_JWT_AUDIENCE="$JWT_AUDIENCE" \
+  BURROW_BEARER_TOKEN="$CLIENT_BEARER_TOKEN" \
+  BURROW_SERVER_URL="$SERVER_URL" \
+  BURROW_CLIENT_ID="$CLIENT_ID" \
+  BURROW_LOCAL_TARGET="$LOCAL_TARGET" \
   exec go run ./cmd/root client
-) >/tmp/krt-e2e-client.log 2>&1 &
+) >/tmp/burrow-e2e-client.log 2>&1 &
 CLIENT_PID=$!
 
 wait_for_tcp 127.0.0.1 "$BRIDGE_PORT" 100 || {
@@ -275,9 +275,9 @@ wait_for_tcp 127.0.0.1 "$BRIDGE_PORT" 100 || {
 echo "[e2e] validating /metrics endpoint"
 metrics="$(curl -fsS "http://127.0.0.1:${SERVER_PORT}/metrics")"
 METRICS_URL="http://127.0.0.1:${SERVER_PORT}/metrics"
-assert_contains "$metrics" "krt_sessions_active"
-assert_contains "$metrics" "krt_streams_active"
-assert_contains "$metrics" "krt_stale_services_deleted_total"
+assert_contains "$metrics" "burrow_sessions_active"
+assert_contains "$metrics" "burrow_streams_active"
+assert_contains "$metrics" "burrow_stale_services_deleted_total"
 
 echo "[e2e] validating tunnel data path"
 if ! wait_for_tunnel_echo "smoke-ok" "$BRIDGE_PORT" 60; then
@@ -301,16 +301,16 @@ echo "[e2e] restarting client to validate recovery"
 CLIENT_BEARER_TOKEN="$(mint_bearer_token "$CLIENT_ID" "$JWT_AUDIENCE" "$JWT_ISSUER" "$JWT_SECRET" 300)"
 (
   cd "$ROOT_DIR"
-  KRT_JWT_ALG="HS256" \
-  KRT_JWT_HMAC_SECRET="$JWT_SECRET" \
-  KRT_JWT_ISSUER="$JWT_ISSUER" \
-  KRT_JWT_AUDIENCE="$JWT_AUDIENCE" \
-  KRT_BEARER_TOKEN="$CLIENT_BEARER_TOKEN" \
-  KRT_SERVER_URL="$SERVER_URL" \
-  KRT_CLIENT_ID="$CLIENT_ID" \
-  KRT_LOCAL_TARGET="$LOCAL_TARGET" \
+  BURROW_JWT_ALG="HS256" \
+  BURROW_JWT_HMAC_SECRET="$JWT_SECRET" \
+  BURROW_JWT_ISSUER="$JWT_ISSUER" \
+  BURROW_JWT_AUDIENCE="$JWT_AUDIENCE" \
+  BURROW_BEARER_TOKEN="$CLIENT_BEARER_TOKEN" \
+  BURROW_SERVER_URL="$SERVER_URL" \
+  BURROW_CLIENT_ID="$CLIENT_ID" \
+  BURROW_LOCAL_TARGET="$LOCAL_TARGET" \
   exec go run ./cmd/root client
-) >/tmp/krt-e2e-client.log 2>&1 &
+) >/tmp/burrow-e2e-client.log 2>&1 &
 CLIENT_PID=$!
 
 if ! wait_for_tunnel_echo "recover-ok" "$BRIDGE_PORT" 80; then

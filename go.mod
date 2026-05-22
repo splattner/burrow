@@ -1,4 +1,4 @@
-module github.com/splattner/k8s-reverse-tunnel
+module github.com/splattner/burrow
 
 go 1.25.0
 

@@ -1,4 +1,8 @@
-# Kubernetes WebSocket Reverse Tunnel
+<p align="center">
+  <img src="logo.png" alt="Burrow logo" width="180">
+</p>
+
+# Burrow
 
 Expose a TCP service running outside your cluster to workloads running inside it — without opening inbound firewall ports or configuring static routes.
 
@@ -8,12 +12,12 @@ The client runs wherever your service lives (laptop, edge node, private server).
   ┌─────────────────────────────────────┐
   │           Kubernetes cluster         │
   │                                      │
-  │  Pod ──► Service ──► krt-server     │
+  │  Pod ──► Service ──► burrow-server     │
   │                           │          │
   └───────────────────────────┼──────────┘
                     WebSocket │ (outbound)
                               │
-                         krt-client
+                         burrow-client
                               │
                          Your service
                        (e.g. :5432)
@@ -59,7 +63,7 @@ Requires Go 1.25+ and Python 3 (used by the token-minting helper script).
 **1. Start the server with a shared HS256 secret:**
 
 ```bash
-make run-server-jwt-dev JWT_HMAC_SECRET=dev-secret JWT_AUDIENCE=krt-server JWT_ISSUER=dev-local
+make run-server-jwt-dev JWT_HMAC_SECRET=dev-secret JWT_AUDIENCE=burrow-server JWT_ISSUER=dev-local
 ```
 
 **2. In a second terminal, mint a token and start the client:**
@@ -69,7 +73,7 @@ make run-client-jwt-dev \
   CLIENT_ID=client-a \
   LOCAL_TARGET=127.0.0.1:5432 \
   JWT_HMAC_SECRET=dev-secret \
-  JWT_AUDIENCE=krt-server \
+  JWT_AUDIENCE=burrow-server \
   JWT_ISSUER=dev-local
 ```
 
@@ -101,11 +105,11 @@ Edit `manifests/deployment.yaml` before applying:
 
 | Field | What to change |
 |---|---|
-| `image` | Your built image (`ghcr.io/yourorg/k8s-reverse-tunnel:tag`) |
-| `KRT_JWT_HMAC_SECRET` | Replace `change-me` with a real secret, or switch to `KRT_JWT_PUBLIC_KEY_FILE` / `KRT_JWKS_URL` |
-| `KRT_JWT_AUDIENCE` | Match the audience your tokens are issued for |
-| `KRT_JWT_ISSUER` | Match your token issuer |
-| `KRT_NAMESPACE` | Namespace where client `Service` objects are created |
+| `image` | Your built image (`ghcr.io/yourorg/burrow:tag`) |
+| `BURROW_JWT_HMAC_SECRET` | Replace `change-me` with a real secret, or switch to `BURROW_JWT_PUBLIC_KEY_FILE` / `BURROW_JWKS_URL` |
+| `BURROW_JWT_AUDIENCE` | Match the audience your tokens are issued for |
+| `BURROW_JWT_ISSUER` | Match your token issuer |
+| `BURROW_NAMESPACE` | Namespace where client `Service` objects are created |
 
 Edit `manifests/ingress.yaml`:
 
@@ -117,17 +121,17 @@ Edit `manifests/ingress.yaml`:
 For production, use RS256 or ES256 with a JWKS endpoint instead of a shared secret:
 
 ```yaml
-- name: KRT_JWT_ALG
+- name: BURROW_JWT_ALG
   value: "RS256"
-- name: KRT_JWKS_URL
+- name: BURROW_JWKS_URL
   value: "https://your-idp.example/.well-known/jwks.json"
-- name: KRT_JWT_AUDIENCE
-  value: "krt-server"
-- name: KRT_JWT_ISSUER
+- name: BURROW_JWT_AUDIENCE
+  value: "burrow-server"
+- name: BURROW_JWT_ISSUER
   value: "https://your-idp.example"
 ```
 
-Remove the `KRT_JWT_HMAC_SECRET` entry when using JWKS.
+Remove the `BURROW_JWT_HMAC_SECRET` entry when using JWKS.
 
 ---
 
@@ -138,9 +142,9 @@ The client binary runs wherever you want to expose a service from. Download a re
 ### Minimal example
 
 ```bash
-k8s-reverse-tunnel client \
+burrow client \
   --bearer-token "$JWT" \
-  --server-url wss://krt.example.com/ws \
+  --server-url wss://burrow.example.com/ws \
   --client-id my-service \
   --local-target 127.0.0.1:5432
 ```
@@ -150,9 +154,9 @@ k8s-reverse-tunnel client \
 Token files are re-read on every reconnect, so token rotation requires no restart:
 
 ```bash
-k8s-reverse-tunnel client \
-  --bearer-token-file /var/run/secrets/krt/token.jwt \
-  --server-url wss://krt.example.com/ws \
+burrow client \
+  --bearer-token-file /var/run/secrets/burrow/token.jwt \
+  --server-url wss://burrow.example.com/ws \
   --client-id my-service \
   --local-target 127.0.0.1:5432
 ```
@@ -166,52 +170,52 @@ The client reconnects proactively before the token expires (controlled by `--tok
 make run-client BEARER_TOKEN="$JWT" CLIENT_ID=my-service LOCAL_TARGET=127.0.0.1:5432
 
 # Token file with custom refresh window
-make run-client BEARER_TOKEN_FILE=/var/run/krt/token.jwt CLIENT_ID=my-service LOCAL_TARGET=127.0.0.1:5432 TOKEN_REFRESH_WINDOW=45s
+make run-client BEARER_TOKEN_FILE=/var/run/burrow/token.jwt CLIENT_ID=my-service LOCAL_TARGET=127.0.0.1:5432 TOKEN_REFRESH_WINDOW=45s
 
 # Production server (JWKS)
-make run-server JWKS_URL=https://idp.example/.well-known/jwks.json JWT_AUDIENCE=krt-server
+make run-server JWKS_URL=https://idp.example/.well-known/jwks.json JWT_AUDIENCE=burrow-server
 ```
 
 ---
 
 ## Configuration reference
 
-All flags can be set via environment variables with the `KRT_` prefix. Flags take precedence over environment variables.
+All flags can be set via environment variables with the `BURROW_` prefix. Flags take precedence over environment variables.
 
 ### Server
 
 | Flag | Env var | Default | Description |
 |---|---|---|---|
-| `--jwt-alg` | `KRT_JWT_ALG` | `RS256` | JWT signing algorithm |
-| `--jwt-hmac-secret` | `KRT_JWT_HMAC_SECRET` | — | HMAC secret for HS256/HS384/HS512 (dev/test) |
-| `--jwt-public-key-file` | `KRT_JWT_PUBLIC_KEY_FILE` | — | Path to PEM public key for RS256/ES256 |
-| `--jwks-url` | `KRT_JWKS_URL` | — | JWKS endpoint URL; keys resolved by `kid` |
-| `--jwks-refresh` | `KRT_JWKS_REFRESH` | `5m` | How often to refresh JWKS keys |
-| `--jwt-issuer` | `KRT_JWT_ISSUER` | — | Expected `iss` claim (optional) |
-| `--jwt-audience` | `KRT_JWT_AUDIENCE` | — | Expected `aud` claim (optional) |
-| `--server-addr` | `KRT_SERVER_ADDR` | `:8080` | WebSocket and HTTP listen address |
-| `--bridge-addr` | `KRT_BRIDGE_ADDR` | — | TCP bridge listen address for pod traffic |
-| `--namespace` | `KRT_NAMESPACE` | `default` | Namespace for auto-created client Services |
-| `--enable-kube-api` | `KRT_ENABLE_KUBE_API` | auto | Force Kubernetes Service reconciliation on (`true`) or off (`false`) |
-| `--heartbeat-interval` | `KRT_HEARTBEAT_INTERVAL` | `10s` | How often to send heartbeats |
-| `--heartbeat-timeout` | `KRT_HEARTBEAT_TIMEOUT` | `30s` | Disconnect client if no heartbeat within this window |
-| `--sweep-interval` | `KRT_SWEEP_INTERVAL` | `1m` | How often to check for stale disconnected Services |
-| `--stale-service-age` | `KRT_STALE_SERVICE_AGE` | `10m` | Delete a disconnected client's Service after this duration |
-| `--log-level` | `KRT_LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
+| `--jwt-alg` | `BURROW_JWT_ALG` | `RS256` | JWT signing algorithm |
+| `--jwt-hmac-secret` | `BURROW_JWT_HMAC_SECRET` | — | HMAC secret for HS256/HS384/HS512 (dev/test) |
+| `--jwt-public-key-file` | `BURROW_JWT_PUBLIC_KEY_FILE` | — | Path to PEM public key for RS256/ES256 |
+| `--jwks-url` | `BURROW_JWKS_URL` | — | JWKS endpoint URL; keys resolved by `kid` |
+| `--jwks-refresh` | `BURROW_JWKS_REFRESH` | `5m` | How often to refresh JWKS keys |
+| `--jwt-issuer` | `BURROW_JWT_ISSUER` | — | Expected `iss` claim (optional) |
+| `--jwt-audience` | `BURROW_JWT_AUDIENCE` | — | Expected `aud` claim (optional) |
+| `--server-addr` | `BURROW_SERVER_ADDR` | `:8080` | WebSocket and HTTP listen address |
+| `--bridge-addr` | `BURROW_BRIDGE_ADDR` | — | TCP bridge listen address for pod traffic |
+| `--namespace` | `BURROW_NAMESPACE` | `default` | Namespace for auto-created client Services |
+| `--enable-kube-api` | `BURROW_ENABLE_KUBE_API` | auto | Force Kubernetes Service reconciliation on (`true`) or off (`false`) |
+| `--heartbeat-interval` | `BURROW_HEARTBEAT_INTERVAL` | `10s` | How often to send heartbeats |
+| `--heartbeat-timeout` | `BURROW_HEARTBEAT_TIMEOUT` | `30s` | Disconnect client if no heartbeat within this window |
+| `--sweep-interval` | `BURROW_SWEEP_INTERVAL` | `1m` | How often to check for stale disconnected Services |
+| `--stale-service-age` | `BURROW_STALE_SERVICE_AGE` | `10m` | Delete a disconnected client's Service after this duration |
+| `--log-level` | `BURROW_LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
 
 ### Client
 
 | Flag | Env var | Default | Description |
 |---|---|---|---|
-| `--bearer-token` | `KRT_BEARER_TOKEN` | — | JWT to send as the bearer token |
-| `--bearer-token-file` | `KRT_BEARER_TOKEN_FILE` | — | File path to read the JWT from (re-read on reconnect) |
-| `--server-url` | `KRT_SERVER_URL` | — | Server WebSocket URL, e.g. `wss://krt.example.com/ws` |
-| `--client-id` | `KRT_CLIENT_ID` | — | Unique identifier for this client; must match JWT `sub` |
-| `--local-target` | `KRT_LOCAL_TARGET` | — | Local `host:port` to forward traffic to |
-| `--token-refresh-window` | `KRT_TOKEN_REFRESH_WINDOW` | `30s` | Reconnect this long before the token expires |
-| `--client-retry-interval` | `KRT_CLIENT_RETRY_INTERVAL` | `1s` | Base backoff interval for transport failures |
-| `--client-auth-retry-interval` | `KRT_CLIENT_AUTH_RETRY_INTERVAL` | `5s` | Base backoff interval for auth failures |
-| `--log-level` | `KRT_LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
+| `--bearer-token` | `BURROW_BEARER_TOKEN` | — | JWT to send as the bearer token |
+| `--bearer-token-file` | `BURROW_BEARER_TOKEN_FILE` | — | File path to read the JWT from (re-read on reconnect) |
+| `--server-url` | `BURROW_SERVER_URL` | — | Server WebSocket URL, e.g. `wss://burrow.example.com/ws` |
+| `--client-id` | `BURROW_CLIENT_ID` | — | Unique identifier for this client; must match JWT `sub` |
+| `--local-target` | `BURROW_LOCAL_TARGET` | — | Local `host:port` to forward traffic to |
+| `--token-refresh-window` | `BURROW_TOKEN_REFRESH_WINDOW` | `30s` | Reconnect this long before the token expires |
+| `--client-retry-interval` | `BURROW_CLIENT_RETRY_INTERVAL` | `1s` | Base backoff interval for transport failures |
+| `--client-auth-retry-interval` | `BURROW_CLIENT_AUTH_RETRY_INTERVAL` | `5s` | Base backoff interval for auth failures |
+| `--log-level` | `BURROW_LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
 
 ---
 
@@ -246,7 +250,7 @@ Requires Go 1.25+.
 ```bash
 # Build the binary
 make build
-# Output: bin/k8s-reverse-tunnel
+# Output: bin/burrow
 
 # Run tests
 make test
@@ -255,4 +259,4 @@ make test
 make e2e-smoke
 ```
 
-The smoke test (`test/e2e/smoke.sh`) starts a local echo server, a server process, and a client process, then verifies the full data path, health endpoints, and reconnect behavior. Logs are written to `/tmp/krt-e2e-*.log`.
+The smoke test (`test/e2e/smoke.sh`) starts a local echo server, a server process, and a client process, then verifies the full data path, health endpoints, and reconnect behavior. Logs are written to `/tmp/burrow-e2e-*.log`.

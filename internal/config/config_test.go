@@ -8,7 +8,7 @@ import (
 )
 
 func TestLoadFromEnvDurationDefaults(t *testing.T) {
-	t.Setenv("KRT_JWT_HMAC_SECRET", "dev-secret")
+	t.Setenv("BURROW_JWT_HMAC_SECRET", "dev-secret")
 	clearDurationEnv(t)
 
 	cfg, err := LoadFromEnv()
@@ -40,14 +40,14 @@ func TestLoadFromEnvDurationDefaults(t *testing.T) {
 }
 
 func TestLoadFromEnvDurationOverrides(t *testing.T) {
-	t.Setenv("KRT_JWT_HMAC_SECRET", "dev-secret")
-	t.Setenv("KRT_HEARTBEAT_INTERVAL", "5s")
-	t.Setenv("KRT_HEARTBEAT_TIMEOUT", "45s")
-	t.Setenv("KRT_SWEEP_INTERVAL", "30s")
-	t.Setenv("KRT_STALE_SERVICE_AGE", "2m")
-	t.Setenv("KRT_TOKEN_REFRESH_WINDOW", "20s")
-	t.Setenv("KRT_CLIENT_RETRY_INTERVAL", "2s")
-	t.Setenv("KRT_CLIENT_AUTH_RETRY_INTERVAL", "7s")
+	t.Setenv("BURROW_JWT_HMAC_SECRET", "dev-secret")
+	t.Setenv("BURROW_HEARTBEAT_INTERVAL", "5s")
+	t.Setenv("BURROW_HEARTBEAT_TIMEOUT", "45s")
+	t.Setenv("BURROW_SWEEP_INTERVAL", "30s")
+	t.Setenv("BURROW_STALE_SERVICE_AGE", "2m")
+	t.Setenv("BURROW_TOKEN_REFRESH_WINDOW", "20s")
+	t.Setenv("BURROW_CLIENT_RETRY_INTERVAL", "2s")
+	t.Setenv("BURROW_CLIENT_AUTH_RETRY_INTERVAL", "7s")
 
 	cfg, err := LoadFromEnv()
 	if err != nil {
@@ -66,14 +66,14 @@ func TestLoadFromEnvDurationOverrides(t *testing.T) {
 }
 
 func TestLoadFromEnvInvalidDuration(t *testing.T) {
-	t.Setenv("KRT_JWT_HMAC_SECRET", "dev-secret")
-	t.Setenv("KRT_SWEEP_INTERVAL", "not-a-duration")
+	t.Setenv("BURROW_JWT_HMAC_SECRET", "dev-secret")
+	t.Setenv("BURROW_SWEEP_INTERVAL", "not-a-duration")
 
 	_, err := LoadFromEnv()
 	if err == nil {
 		t.Fatal("expected error for invalid duration")
 	}
-	if !strings.Contains(err.Error(), "KRT_SWEEP_INTERVAL") {
+	if !strings.Contains(err.Error(), "BURROW_SWEEP_INTERVAL") {
 		t.Fatalf("expected env key in error, got %v", err)
 	}
 }
@@ -84,7 +84,7 @@ func TestValidateServerRequiresJWTSource(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected validation error for empty server config")
 	}
-	for _, want := range []string{"--jwt-hmac-secret", "KRT_JWT_HMAC_SECRET", "--jwks-url", "KRT_JWKS_URL"} {
+	for _, want := range []string{"--jwt-hmac-secret", "BURROW_JWT_HMAC_SECRET", "--jwks-url", "BURROW_JWKS_URL"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected %q in error, got: %v", want, err)
 		}
@@ -97,7 +97,7 @@ func TestValidateServerAcceptsJWTSources(t *testing.T) {
 		cfg  Config
 	}{
 		{"hmac-secret", Config{JWTHMACSecret: "dev-secret"}},
-		{"public-key-file", Config{JWTPublicKeyFile: "/etc/krt/jwt.pem"}},
+		{"public-key-file", Config{JWTPublicKeyFile: "/etc/burrow/jwt.pem"}},
 		{"jwks-url", Config{JWKSURL: "https://issuer.example/.well-known/jwks.json"}},
 	}
 	for _, tc := range cases {
@@ -173,10 +173,10 @@ func TestValidateClientAcceptsValidConfig(t *testing.T) {
 }
 
 func TestLoadFromEnvAcceptsBearerOnly(t *testing.T) {
-	t.Setenv("KRT_BEARER_TOKEN", "dev-jwt")
-	t.Setenv("KRT_JWT_HMAC_SECRET", "")
-	t.Setenv("KRT_JWT_PUBLIC_KEY_FILE", "")
-	t.Setenv("KRT_JWKS_URL", "")
+	t.Setenv("BURROW_BEARER_TOKEN", "dev-jwt")
+	t.Setenv("BURROW_JWT_HMAC_SECRET", "")
+	t.Setenv("BURROW_JWT_PUBLIC_KEY_FILE", "")
+	t.Setenv("BURROW_JWKS_URL", "")
 
 	cfg, err := LoadFromEnv()
 	if err != nil {
@@ -188,11 +188,11 @@ func TestLoadFromEnvAcceptsBearerOnly(t *testing.T) {
 }
 
 func TestLoadFromEnvAcceptsBearerFileOnly(t *testing.T) {
-	t.Setenv("KRT_BEARER_TOKEN", "")
-	t.Setenv("KRT_BEARER_TOKEN_FILE", "/tmp/client-token.jwt")
-	t.Setenv("KRT_JWT_HMAC_SECRET", "")
-	t.Setenv("KRT_JWT_PUBLIC_KEY_FILE", "")
-	t.Setenv("KRT_JWKS_URL", "")
+	t.Setenv("BURROW_BEARER_TOKEN", "")
+	t.Setenv("BURROW_BEARER_TOKEN_FILE", "/tmp/client-token.jwt")
+	t.Setenv("BURROW_JWT_HMAC_SECRET", "")
+	t.Setenv("BURROW_JWT_PUBLIC_KEY_FILE", "")
+	t.Setenv("BURROW_JWKS_URL", "")
 
 	cfg, err := LoadFromEnv()
 	if err != nil {
@@ -204,9 +204,9 @@ func TestLoadFromEnvAcceptsBearerFileOnly(t *testing.T) {
 }
 
 func TestLoadFromEnvJWTAcceptsJWKSURL(t *testing.T) {
-	t.Setenv("KRT_JWT_HMAC_SECRET", "")
-	t.Setenv("KRT_JWT_PUBLIC_KEY_FILE", "")
-	t.Setenv("KRT_JWKS_URL", "https://issuer.example/.well-known/jwks.json")
+	t.Setenv("BURROW_JWT_HMAC_SECRET", "")
+	t.Setenv("BURROW_JWT_PUBLIC_KEY_FILE", "")
+	t.Setenv("BURROW_JWKS_URL", "https://issuer.example/.well-known/jwks.json")
 
 	if _, err := LoadFromEnv(); err != nil {
 		t.Fatalf("expected config to accept JWKS URL: %v", err)
@@ -214,8 +214,8 @@ func TestLoadFromEnvJWTAcceptsJWKSURL(t *testing.T) {
 }
 
 func TestLoadFromEnvParsesEnableKubeAPI(t *testing.T) {
-	t.Setenv("KRT_JWT_HMAC_SECRET", "dev-secret")
-	t.Setenv("KRT_ENABLE_KUBE_API", "true")
+	t.Setenv("BURROW_JWT_HMAC_SECRET", "dev-secret")
+	t.Setenv("BURROW_ENABLE_KUBE_API", "true")
 
 	cfg, err := LoadFromEnv()
 	if err != nil {
@@ -230,14 +230,14 @@ func TestLoadFromEnvParsesEnableKubeAPI(t *testing.T) {
 }
 
 func TestLoadFromEnvRejectsInvalidEnableKubeAPI(t *testing.T) {
-	t.Setenv("KRT_JWT_HMAC_SECRET", "dev-secret")
-	t.Setenv("KRT_ENABLE_KUBE_API", "maybe")
+	t.Setenv("BURROW_JWT_HMAC_SECRET", "dev-secret")
+	t.Setenv("BURROW_ENABLE_KUBE_API", "maybe")
 
 	_, err := LoadFromEnv()
 	if err == nil {
-		t.Fatal("expected error for invalid KRT_ENABLE_KUBE_API")
+		t.Fatal("expected error for invalid BURROW_ENABLE_KUBE_API")
 	}
-	if !strings.Contains(err.Error(), "KRT_ENABLE_KUBE_API") {
+	if !strings.Contains(err.Error(), "BURROW_ENABLE_KUBE_API") {
 		t.Fatalf("expected env key in error, got %v", err)
 	}
 }
@@ -245,13 +245,13 @@ func TestLoadFromEnvRejectsInvalidEnableKubeAPI(t *testing.T) {
 func clearDurationEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
-		"KRT_HEARTBEAT_INTERVAL",
-		"KRT_HEARTBEAT_TIMEOUT",
-		"KRT_SWEEP_INTERVAL",
-		"KRT_STALE_SERVICE_AGE",
-		"KRT_TOKEN_REFRESH_WINDOW",
-		"KRT_CLIENT_RETRY_INTERVAL",
-		"KRT_CLIENT_AUTH_RETRY_INTERVAL",
+		"BURROW_HEARTBEAT_INTERVAL",
+		"BURROW_HEARTBEAT_TIMEOUT",
+		"BURROW_SWEEP_INTERVAL",
+		"BURROW_STALE_SERVICE_AGE",
+		"BURROW_TOKEN_REFRESH_WINDOW",
+		"BURROW_CLIENT_RETRY_INTERVAL",
+		"BURROW_CLIENT_AUTH_RETRY_INTERVAL",
 	} {
 		if err := os.Unsetenv(key); err != nil {
 			t.Fatalf("unset %s: %v", key, err)

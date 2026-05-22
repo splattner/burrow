@@ -14,12 +14,12 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
-	"github.com/splattner/k8s-reverse-tunnel/internal/auth"
-	"github.com/splattner/k8s-reverse-tunnel/internal/config"
-	"github.com/splattner/k8s-reverse-tunnel/internal/kube"
-	"github.com/splattner/k8s-reverse-tunnel/internal/metrics"
-	"github.com/splattner/k8s-reverse-tunnel/internal/protocol"
-	"github.com/splattner/k8s-reverse-tunnel/internal/tunnel"
+	"github.com/splattner/burrow/internal/auth"
+	"github.com/splattner/burrow/internal/config"
+	"github.com/splattner/burrow/internal/kube"
+	"github.com/splattner/burrow/internal/metrics"
+	"github.com/splattner/burrow/internal/protocol"
+	"github.com/splattner/burrow/internal/tunnel"
 )
 
 var upgrader = websocket.Upgrader{
@@ -636,18 +636,18 @@ func (s *Server) heartbeatLoop(ctx context.Context) {
 func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	_, _ = fmt.Fprintf(w,
-		"# HELP krt_sessions_active Number of active websocket client sessions.\n"+
-			"# TYPE krt_sessions_active gauge\n"+
-			"krt_sessions_active %d\n"+
-			"# HELP krt_streams_active Number of active multiplexed streams.\n"+
-			"# TYPE krt_streams_active gauge\n"+
-			"krt_streams_active %d\n"+
-			"# HELP krt_stale_services_deleted_total Total stale client services deleted by sweeps.\n"+
-			"# TYPE krt_stale_services_deleted_total counter\n"+
-			"krt_stale_services_deleted_total %d\n"+
-			"# HELP krt_stream_backpressure_drops_total Total stream drops caused by backpressure saturation.\n"+
-			"# TYPE krt_stream_backpressure_drops_total counter\n"+
-			"krt_stream_backpressure_drops_total %d\n",
+		"# HELP burrow_sessions_active Number of active websocket client sessions.\n"+
+			"# TYPE burrow_sessions_active gauge\n"+
+			"burrow_sessions_active %d\n"+
+			"# HELP burrow_streams_active Number of active multiplexed streams.\n"+
+			"# TYPE burrow_streams_active gauge\n"+
+			"burrow_streams_active %d\n"+
+			"# HELP burrow_stale_services_deleted_total Total stale client services deleted by sweeps.\n"+
+			"# TYPE burrow_stale_services_deleted_total counter\n"+
+			"burrow_stale_services_deleted_total %d\n"+
+			"# HELP burrow_stream_backpressure_drops_total Total stream drops caused by backpressure saturation.\n"+
+			"# TYPE burrow_stream_backpressure_drops_total counter\n"+
+			"burrow_stream_backpressure_drops_total %d\n",
 		s.metrics.Sessions(),
 		s.metrics.Streams(),
 		s.metrics.StaleServicesDeleted(),

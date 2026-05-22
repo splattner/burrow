@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"github.com/splattner/k8s-reverse-tunnel/cmd/client"
-	"github.com/splattner/k8s-reverse-tunnel/cmd/server"
+	"github.com/splattner/burrow/cmd/client"
+	"github.com/splattner/burrow/cmd/server"
 )
 
 func main() {
@@ -20,7 +20,7 @@ func main() {
 	v := newViper()
 
 	rootCmd := &cobra.Command{
-		Use:           "k8s-reverse-tunnel",
+		Use:           "burrow",
 		Short:         "Expose local TCP services to Kubernetes over a WebSocket tunnel",
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -45,7 +45,7 @@ func main() {
 
 func newViper() *viper.Viper {
 	v := viper.New()
-	v.SetEnvPrefix("KRT")
+	v.SetEnvPrefix("BURROW")
 	v.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	v.AutomaticEnv()
 	return v

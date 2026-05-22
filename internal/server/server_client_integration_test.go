@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	clientpkg "github.com/splattner/k8s-reverse-tunnel/internal/client"
-	"github.com/splattner/k8s-reverse-tunnel/internal/config"
-	"github.com/splattner/k8s-reverse-tunnel/internal/logging"
-	serverpkg "github.com/splattner/k8s-reverse-tunnel/internal/server"
-	"github.com/splattner/k8s-reverse-tunnel/internal/tunnel"
+	clientpkg "github.com/splattner/burrow/internal/client"
+	"github.com/splattner/burrow/internal/config"
+	"github.com/splattner/burrow/internal/logging"
+	serverpkg "github.com/splattner/burrow/internal/server"
+	"github.com/splattner/burrow/internal/tunnel"
 )
 
 func TestServerClientRelayWithLocalEcho(t *testing.T) {
@@ -29,7 +29,7 @@ func TestServerClientRelayWithLocalEcho(t *testing.T) {
 	srv := serverpkg.New(config.Config{
 		JWTAlg:        "HS256",
 		JWTHMACSecret: "jwt-secret",
-		JWTAudience:   "krt-server",
+		JWTAudience:   "burrow-server",
 		ServerAddr:    "127.0.0.1:0",
 		Namespace:     "default",
 	}, logging.NoOp())
@@ -57,7 +57,7 @@ func TestServerClientRelayWithLocalEcho(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected metrics status 200, got %d", resp.StatusCode)
 	}
-	if !strings.Contains(string(body), "krt_sessions_active") {
+	if !strings.Contains(string(body), "burrow_sessions_active") {
 		t.Fatalf("metrics output missing expected family: %s", string(body))
 	}
 
@@ -133,7 +133,7 @@ func TestServerBridgeListenerRelaysToClient(t *testing.T) {
 	srv := serverpkg.New(config.Config{
 		JWTAlg:        "HS256",
 		JWTHMACSecret: "jwt-secret",
-		JWTAudience:   "krt-server",
+		JWTAudience:   "burrow-server",
 		ServerAddr:    "127.0.0.1:0",
 		BridgeAddr:    "127.0.0.1:0",
 		Namespace:     "default",
@@ -226,7 +226,7 @@ func TestServerClientReconnectReopensFreshStreams(t *testing.T) {
 	srv := serverpkg.New(config.Config{
 		JWTAlg:        "HS256",
 		JWTHMACSecret: "jwt-secret",
-		JWTAudience:   "krt-server",
+		JWTAudience:   "burrow-server",
 		ServerAddr:    "127.0.0.1:0",
 		Namespace:     "default",
 	}, logging.NoOp())
@@ -451,7 +451,7 @@ func startTCPEcho(t *testing.T) (string, func()) {
 func signedHMACTestToken(secret, subject string) (string, error) {
 	claims := jwt.RegisteredClaims{
 		Issuer:    "test-issuer",
-		Audience:  jwt.ClaimStrings{"krt-server"},
+		Audience:  jwt.ClaimStrings{"burrow-server"},
 		ExpiresAt: jwt.NewNumericDate(time.Now().Add(2 * time.Minute)),
 		IssuedAt:  jwt.NewNumericDate(time.Now().Add(-5 * time.Second)),
 		NotBefore: jwt.NewNumericDate(time.Now().Add(-5 * time.Second)),

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/splattner/k8s-reverse-tunnel/internal/config"
-	"github.com/splattner/k8s-reverse-tunnel/internal/logging"
+	"github.com/splattner/burrow/internal/config"
+	"github.com/splattner/burrow/internal/logging"
 )
 
 func TestHandleMetricsExposesCurrentCounters(t *testing.T) {
@@ -29,10 +29,10 @@ func TestHandleMetricsExposesCurrentCounters(t *testing.T) {
 	body := rr.Body.String()
 
 	checks := []string{
-		"krt_sessions_active 1",
-		"krt_streams_active 1",
-		"krt_stale_services_deleted_total 3",
-		"krt_stream_backpressure_drops_total 1",
+		"burrow_sessions_active 1",
+		"burrow_streams_active 1",
+		"burrow_stale_services_deleted_total 3",
+		"burrow_stream_backpressure_drops_total 1",
 	}
 	for _, needle := range checks {
 		if !strings.Contains(body, needle) {

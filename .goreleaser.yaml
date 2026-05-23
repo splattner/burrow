@@ -53,6 +53,9 @@ dockers_v2:
     platforms:
       - linux/amd64
       - linux/arm64
+    build_flag_templates:
+      - "--cache-from=type=gha"
+      - "--cache-to=type=gha,mode=max"
     labels:
       org.opencontainers.image.title: "{{ .ProjectName }}"
       org.opencontainers.image.description: "Expose local TCP services to Kubernetes over a WebSocket tunnel"

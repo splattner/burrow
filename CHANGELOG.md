@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/splattner/burrow/compare/v0.2.5...v0.3.0) (2026-05-23)
+
+
+### Features
+
+* add expose command to automaticly deploy on k8s ([#42](https://github.com/splattner/burrow/issues/42)) ([9889bb2](https://github.com/splattner/burrow/commit/9889bb2a6d5dda61a58bb29dcbfcdd769669c255))
+
 ## [0.2.5](https://github.com/splattner/burrow/compare/v0.2.4...v0.2.5) (2026-05-23)
 
 

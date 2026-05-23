@@ -18,7 +18,7 @@ spec:
       serviceAccountName: burrow-server
       containers:
         - name: server
-          image: ghcr.io/example/burrow:latest
+          image: ghcr.io/splattner/burrow:latest
           imagePullPolicy: IfNotPresent
           args: ["server"]
           env:

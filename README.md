@@ -243,6 +243,40 @@ When using `--bearer-token-file`, the client reads the file on every reconnect. 
 
 ---
 
+## Container images
+
+Images are published to the GitHub Container Registry at `ghcr.io/splattner/burrow`.
+
+| Tag | Description |
+|---|---|
+| `latest` | Most recent stable release |
+| `v1.2.3` | Specific release version |
+| `edge` | Latest commit on `main` (may be unstable) |
+| `sha-abc1234` | Pinned to a specific commit |
+
+```bash
+# Pull the latest stable release
+docker pull ghcr.io/splattner/burrow:latest
+
+# Pull a specific version
+docker pull ghcr.io/splattner/burrow:v1.2.3
+
+# Pull the latest development build
+docker pull ghcr.io/splattner/burrow:edge
+```
+
+Release images are signed with [Sigstore cosign](https://docs.sigstore.dev/cosign/overview/) using keyless signing. Verify a release image:
+
+```bash
+cosign verify ghcr.io/splattner/burrow:latest \
+  --certificate-identity-regexp="https://github.com/splattner/burrow/" \
+  --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+```
+
+SBOM files (CycloneDX/SPDX) are attached to each [GitHub release](https://github.com/splattner/burrow/releases) as release assets.
+
+---
+
 ## Building from source
 
 Requires Go 1.25+.

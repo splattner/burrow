@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/splattner/burrow/cmd/client"
+	"github.com/splattner/burrow/cmd/expose"
 	"github.com/splattner/burrow/cmd/server"
 )
 
@@ -33,6 +34,7 @@ func main() {
 
 	rootCmd.AddCommand(server.NewCommand(ctx, v))
 	rootCmd.AddCommand(client.NewCommand(ctx, v))
+	rootCmd.AddCommand(expose.NewCommand(ctx, v))
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		if err == context.Canceled {

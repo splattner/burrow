@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/splattner/burrow/compare/v0.2.0...v0.2.1) (2026-05-23)
+
+
+### Bug Fixes
+
+* goreleaser action ([#24](https://github.com/splattner/burrow/issues/24)) ([3b7138d](https://github.com/splattner/burrow/commit/3b7138d3640002de71b5961c8e6cfe0cd4753f50))
+
 ## [0.2.0](https://github.com/splattner/burrow/compare/v0.1.0...v0.2.0) (2026-05-23)
 
 

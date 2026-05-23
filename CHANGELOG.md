@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.5](https://github.com/splattner/burrow/compare/v0.2.4...v0.2.5) (2026-05-23)
+
+
+### Bug Fixes
+
+* container image in manifest files ([#38](https://github.com/splattner/burrow/issues/38)) ([067a5a7](https://github.com/splattner/burrow/commit/067a5a7a77f77aedcf722024636590d15663ced1))
+
 ## [0.2.4](https://github.com/splattner/burrow/compare/v0.2.3...v0.2.4) (2026-05-23)
 
 

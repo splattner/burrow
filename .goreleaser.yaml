@@ -61,8 +61,10 @@ dockers_v2:
       org.opencontainers.image.version: "{{ .Version }}"
 
 sboms:
-  - artifacts: archive
-  - artifacts: source
+  - id: archive
+    artifacts: archive
+  - id: source
+    artifacts: source
 
 docker_signs:
   - cmd: cosign

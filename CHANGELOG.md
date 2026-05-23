@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/splattner/burrow/compare/v0.2.2...v0.2.3) (2026-05-23)
+
+
+### Bug Fixes
+
+* goreleaser action, install syft ([#28](https://github.com/splattner/burrow/issues/28)) ([649613a](https://github.com/splattner/burrow/commit/649613a3bf71f5a001a107512a8927fefde1b9cd))
+
 ## [0.2.2](https://github.com/splattner/burrow/compare/v0.2.1...v0.2.2) (2026-05-23)
 
 

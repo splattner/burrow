@@ -1,0 +1,15 @@
+# Changelog
+
+## [0.2.0](https://github.com/splattner/burrow/compare/v0.1.0...v0.2.0) (2026-05-23)
+
+
+### Features
+
+* initial implementation ([e8378d0](https://github.com/splattner/burrow/commit/e8378d0e29bb455e4b2f9865de1b01ee84456ea1))
+
+
+### Bug Fixes
+
+* **deps:** update kubernetes monorepo to v0.36.1 ([#12](https://github.com/splattner/burrow/issues/12)) ([4bb3ec2](https://github.com/splattner/burrow/commit/4bb3ec205db395af9b078ee62fec29ecdc80aaf8))
+* **deps:** update module github.com/spf13/cobra to v1.10.2 ([#9](https://github.com/splattner/burrow/issues/9)) ([d22b17c](https://github.com/splattner/burrow/commit/d22b17c7ac704bf28a61b180b08c1417db69cee7))
+* **deps:** update module github.com/spf13/viper to v1.21.0 ([#10](https://github.com/splattner/burrow/issues/10)) ([80a0623](https://github.com/splattner/burrow/commit/80a062396f84b32c2db7e53fadae8609309bb051))

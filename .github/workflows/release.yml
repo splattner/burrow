@@ -23,19 +23,22 @@ jobs:
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
-      version: ${{ steps.release.outputs.version }}
     steps:
-      - name: Run release-please
+      - name: Run Release Please
         id: release
         uses: googleapis/release-please-action@v4
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  image:
-    name: Container image
-    runs-on: ubuntu-latest
+  # Runs on every push to main that is NOT a release. Builds and pushes a
+  # development image tagged `edge` (latest unreleased) and `sha-<short>`.
+  # latest is intentionally reserved for GoReleaser on tagged releases.
+  snapshot:
+    name: Snapshot image (edge)
     needs: release-please
+    if: needs.release-please.outputs.release_created != 'true'
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -63,12 +66,10 @@ jobs:
         with:
           images: ${{ steps.image.outputs.image }}
           tags: |
-            type=raw,value=latest
+            type=raw,value=edge
             type=sha,format=short,prefix=sha-
-            type=raw,value=${{ needs.release-please.outputs.tag_name }},enable=${{ needs.release-please.outputs.release_created == 'true' }}
-            type=raw,value=${{ needs.release-please.outputs.version }},enable=${{ needs.release-please.outputs.release_created == 'true' }}
 
-      - name: Build and push image
+      - name: Build and push snapshot image
         id: build
         uses: docker/build-push-action@v6
         with:
@@ -80,10 +81,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Scan image vulnerabilities
+      - name: Scan snapshot image for vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          image-ref: ${{ steps.image.outputs.image }}@${{ steps.build.outputs.digest }}
           format: table
           severity: HIGH,CRITICAL
           scanners: vuln
@@ -95,7 +96,7 @@ jobs:
         if: always()
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          image-ref: ${{ steps.image.outputs.image }}@${{ steps.build.outputs.digest }}
           format: sarif
           output: trivy-image-results.sarif
           severity: HIGH,CRITICAL
@@ -111,34 +112,86 @@ jobs:
         with:
           sarif_file: trivy-image-results.sarif
 
-      - name: Generate CycloneDX SBOM
-        if: always()
-        uses: aquasecurity/trivy-action@v0.36.0
+  # Runs only when release-please creates a release. GoReleaser owns the full
+  # release pipeline: changelog, cross-compiled binaries, versioned container
+  # images (including `latest`), SBOM attachment, and cosign signing.
+  goreleaser:
+    name: GoReleaser
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
         with:
-          image-ref: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
-          format: cyclonedx
-          output: burrow.sbom.cdx.json
-          scanners: vuln
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          fetch-depth: 0
 
-      - name: Upload SBOM artifact
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Set image name
+        id: image
+        run: |
+          image="${REGISTRY}/${GITHUB_REPOSITORY_OWNER,,}/burrow"
+          echo "IMAGE_NAME=${image}" >> "$GITHUB_ENV"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          name: burrow-sbom
-          path: burrow.sbom.cdx.json
-          if-no-files-found: error
+          go-version-file: go.mod
+          cache: true
 
-      - name: Attach SBOM to GitHub release
-        if: ${{ always() && needs.release-please.outputs.release_created == 'true' }}
-        run: gh release upload "${TAG_NAME}" burrow.sbom.cdx.json --clobber
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
-      - name: Sign image
-        run: cosign sign --yes "${IMAGE_NAME}@${DIGEST}"
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_NAME: ${{ steps.image.outputs.image }}
+
+      - name: Scan release image for vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.image }}:${{ needs.release-please.outputs.tag_name }}
+          format: table
+          severity: HIGH,CRITICAL
+          scanners: vuln
+          vuln-type: os,library
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Generate release image SARIF
+        if: always()
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.image }}:${{ needs.release-please.outputs.tag_name }}
+          format: sarif
+          output: trivy-image-results.sarif
+          severity: HIGH,CRITICAL
+          scanners: vuln
+          vuln-type: os,library
+          ignore-unfixed: true
+          exit-code: "0"
+
+      - name: Upload Trivy SARIF
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image-results.sarif
+
+

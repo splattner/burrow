@@ -1,0 +1,87 @@
+version: 2
+
+project_name: burrow
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: burrow
+    main: ./cmd/root
+    binary: burrow
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - id: burrow
+    ids:
+      - burrow
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+checksum:
+  name_template: checksums.txt
+
+dockers_v2:
+  - id: burrow
+    ids:
+      - burrow
+    dockerfile: Dockerfile.goreleaser
+    images:
+      - "{{ .Env.IMAGE_NAME }}"
+    tags:
+      - "{{ .Tag }}"
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      org.opencontainers.image.title: "{{ .ProjectName }}"
+      org.opencontainers.image.description: "Expose local TCP services to Kubernetes over a WebSocket tunnel"
+      org.opencontainers.image.source: "https://github.com/{{ .Env.GITHUB_REPOSITORY }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.version: "{{ .Version }}"
+
+sboms:
+  - artifacts: archive
+  - artifacts: source
+
+docker_signs:
+  - cmd: cosign
+    args:
+      - sign
+      - --yes
+      - "${artifact}@${digest}"
+    output: true
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+release:
+  mode: replace
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

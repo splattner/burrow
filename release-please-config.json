@@ -3,7 +3,8 @@
     ".": {
       "release-type": "go",
       "package-name": "burrow",
-      "include-component-in-tag": false
+      "include-component-in-tag": false,
+      "create-changelog": false
     }
   }
 }

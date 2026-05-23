@@ -71,6 +71,8 @@ docker_signs:
     args:
       - sign
       - --yes
+      - --registry-username={{ .Env.GITHUB_ACTOR }}
+      - --registry-password={{ .Env.GITHUB_TOKEN }}
       - "${artifact}@${digest}"
     output: true
 

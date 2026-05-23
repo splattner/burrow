@@ -43,6 +43,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Read Go version from go.mod
+        id: goversion
+        run: echo "version=$(sed -n 's/^go //p' go.mod)" >> "$GITHUB_OUTPUT"
+
       - name: Set image name
         id: image
         run: |
@@ -78,6 +82,7 @@ jobs:
           push: true
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
+          build-args: GO_VERSION=${{ steps.goversion.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

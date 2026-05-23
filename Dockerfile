@@ -1,4 +1,5 @@
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26.3 AS builder
+ARG GO_VERSION=1.26
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:${GO_VERSION} AS builder
 WORKDIR /src
 
 COPY go.mod go.sum ./

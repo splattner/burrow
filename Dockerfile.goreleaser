@@ -1,0 +1,7 @@
+FROM gcr.io/distroless/static-debian12
+
+ARG TARGETPLATFORM
+
+COPY ${TARGETPLATFORM}/burrow /burrow
+
+ENTRYPOINT ["/burrow"]

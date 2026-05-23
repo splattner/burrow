@@ -1,4 +1,5 @@
 BINARY := burrow
+VERSION ?= dev
 JWT_ALG ?= RS256
 JWT_HMAC_SECRET ?= dev-secret
 JWT_PUBLIC_KEY_FILE ?=
@@ -20,7 +21,7 @@ LOCAL_TARGET ?= 127.0.0.1:3000
 .PHONY: build test e2e-smoke run-server run-client run-server-jwt-dev run-client-jwt-dev tidy
 
 build:
-	go build -o bin/$(BINARY) ./cmd/root
+	go build -ldflags "-s -w -X github.com/splattner/burrow/internal/version.Version=$(VERSION)" -o bin/$(BINARY) ./cmd/root
 
 test:
 	go test ./...

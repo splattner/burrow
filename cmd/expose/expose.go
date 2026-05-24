@@ -62,7 +62,6 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 	flags.StringArray("ingress-annotation", nil, "Extra Ingress annotation in key=value format (repeatable)")
 	flags.String("image", defaultImage, "Container image for the burrow server")
 	flags.Int("server-port", 8080, "Port the server listens on inside the container")
-	flags.Int("bridge-port", 1111, "Port the bridge listener uses inside the container")
 	flags.Bool("reuse", false, "Connect to an existing burrow server deployment instead of creating one")
 	flags.Bool("keep", false, "Leave server resources in Kubernetes after the tunnel closes")
 	flags.Duration("wait-timeout", 2*time.Minute, "Maximum time to wait for the server to become available")
@@ -120,7 +119,6 @@ func buildConfig(cmd *cobra.Command) (*exposepkg.Config, error) {
 	rawAnnotations, _ := flags.GetStringArray("ingress-annotation")
 	image, _ := flags.GetString("image")
 	serverPort, _ := flags.GetInt("server-port")
-	bridgePort, _ := flags.GetInt("bridge-port")
 	reuse, _ := flags.GetBool("reuse")
 	keep, _ := flags.GetBool("keep")
 	waitTimeout, _ := flags.GetDuration("wait-timeout")
@@ -153,7 +151,6 @@ func buildConfig(cmd *cobra.Command) (*exposepkg.Config, error) {
 		IngressAnnotations: annotations,
 		Image:              image,
 		ServerPort:         serverPort,
-		BridgePort:         bridgePort,
 		Reuse:              reuse,
 		Keep:               keep,
 		WaitTimeout:        waitTimeout,

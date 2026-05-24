@@ -32,9 +32,8 @@ type Config struct {
 	// Container image; defaults to ghcr.io/splattner/burrow:<version>
 	Image string
 
-	// Server ports inside the container
+	// Server HTTP port inside the container
 	ServerPort int
-	BridgePort int
 
 	// Lifecycle
 	Reuse       bool

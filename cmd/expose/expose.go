@@ -53,6 +53,7 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 
 	flags := cmd.Flags()
 	flags.String("client-id", "", "Unique client ID (required)")
+	flags.String("server-name", "", "Kubernetes resource name for the server deployment (defaults to --client-id; use to share one server across multiple clients)")
 	flags.String("local-target", "", "Local host:port to forward tunnel traffic to (required)")
 	flags.String("kube-context", "", "Kubernetes context to use (default: current context)")
 	flags.String("namespace", "", "Kubernetes namespace (default: context namespace)")
@@ -83,26 +84,36 @@ func newDeleteCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete",
 		Short: "Delete Kubernetes resources created by burrow expose",
-		Example: `  # Delete resources in the current context namespace
+		Example: `  # Delete by client ID (backward compatible)
   burrow expose delete --client-id pg
 
+  # Delete by server name (shared server deployment)
+  burrow expose delete --server-name prod-tunnel
+
   # Delete in a specific namespace and context
-  burrow expose delete --client-id pg --namespace staging --kube-context prod`,
+  burrow expose delete --server-name prod-tunnel --namespace staging --kube-context prod`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			flags := cmd.Flags()
 			clientID, _ := flags.GetString("client-id")
+			serverName, _ := flags.GetString("server-name")
 			namespace, _ := flags.GetString("namespace")
 			kubeContext, _ := flags.GetString("kube-context")
+			if serverName == "" {
+				serverName = clientID
+			}
+			if serverName == "" {
+				return fmt.Errorf("either --server-name or --client-id is required")
+			}
 			logger := logging.New(v.GetString("log-level"))
-			return exposepkg.DeleteSession(ctx, clientID, namespace, kubeContext, logger)
+			return exposepkg.DeleteSession(ctx, serverName, clientID, namespace, kubeContext, logger)
 		},
 	}
 
 	flags := cmd.Flags()
-	flags.String("client-id", "", "Client ID of the session to delete (required)")
+	flags.String("server-name", "", "Server name to delete (use the --server-name given at deploy time)")
+	flags.String("client-id", "", "Client ID used at deploy time; fallback if --server-name is not set")
 	flags.String("namespace", "", "Kubernetes namespace (default: context namespace)")
 	flags.String("kube-context", "", "Kubernetes context to use (default: current context)")
-	_ = cmd.MarkFlagRequired("client-id")
 	return cmd
 }
 
@@ -110,6 +121,10 @@ func buildConfig(cmd *cobra.Command) (*exposepkg.Config, error) {
 	flags := cmd.Flags()
 
 	clientID, _ := flags.GetString("client-id")
+	serverName, _ := flags.GetString("server-name")
+	if serverName == "" {
+		serverName = clientID
+	}
 	localTarget, _ := flags.GetString("local-target")
 	kubeContext, _ := flags.GetString("kube-context")
 	namespace, _ := flags.GetString("namespace")
@@ -142,6 +157,7 @@ func buildConfig(cmd *cobra.Command) (*exposepkg.Config, error) {
 
 	return &exposepkg.Config{
 		ClientID:           clientID,
+		ServerName:         serverName,
 		LocalTarget:        localTarget,
 		KubeContext:        kubeContext,
 		Namespace:          namespace,

@@ -11,6 +11,7 @@ import (
 func testCfg() *Config {
 	return &Config{
 		ClientID:    "test-client",
+		ServerName:  "test-client",
 		LocalTarget: "127.0.0.1:5432",
 		Namespace:   "test-ns",
 		Image:       "ghcr.io/splattner/burrow:test",
@@ -21,7 +22,7 @@ func testCfg() *Config {
 // ---- ResourceName / AuthSecretName -----------------------------------------
 
 func TestResourceNames(t *testing.T) {
-	cfg := &Config{ClientID: "my-client"}
+	cfg := &Config{ServerName: "my-client"}
 	assert.Equal(t, "burrow-my-client", cfg.ResourceName())
 	assert.Equal(t, "burrow-my-client-auth", cfg.AuthSecretName())
 }
@@ -231,5 +232,5 @@ func TestCommonLabels(t *testing.T) {
 	labels := cfg.commonLabels()
 	assert.Equal(t, cfg.ResourceName(), labels["app.kubernetes.io/name"])
 	assert.Equal(t, managedByLabel, labels["app.kubernetes.io/managed-by"])
-	assert.Equal(t, cfg.ClientID, labels["burrow.dev/client-id"])
+	assert.Equal(t, cfg.ServerName, labels["burrow.dev/server-name"])
 }

@@ -32,23 +32,27 @@ The server optionally auto-creates and cleans up Kubernetes `Service` objects fo
 
 ```
 cmd/
-  root/       Cobra root command; registers server and client subcommands; binds --log-level
+  root/       Cobra root command; registers server, client, and expose subcommands; binds --log-level
   server/     server subcommand: validates config, builds logger, calls internal/server
   client/     client subcommand: validates config, builds logger, calls internal/client
+  expose/     expose subcommand: deploys server to Kubernetes and starts local client
 internal/
   config/     Single Config struct; LoadFromViper; ValidateServer; ValidateClient
   auth/       JWT Verifier; typed ErrorCode values for auth rejection reasons
   protocol/   Binary frame codec (14-byte header + payload); control and data frame types
   tunnel/     Stream Multiplexer; HeartbeatTracker
-  server/     Server runtime: WebSocket handler, stream router, bridge listener, stale sweep
+  server/     Server runtime: WebSocket handler, per-client session, bridge listener, stale sweep
+    server.go   Multi-tenant Server struct; HTTP mux; session lifecycle
+    session.go  Per-client session state (conn, mux, bridge listener, pending opens)
   client/     Client runtime: outbound dialer, register loop, local TCP forwarder
   bridge/     TCP relay helpers (bidirectional copy)
+  expose/     Expose orchestrator: builds and deploys Kubernetes resources for a tunnel session
   kube/       Kubernetes Service reconciler (create/update/delete per client)
   metrics/    In-process counters (sessions, streams, drops, stale deletes); /metrics endpoint
   logging/    logrus factory: New(level), NoOp() for tests
 manifests/    Kubernetes deployment manifests
 scripts/      run-client-jwt-dev.sh: mints HS256 JWT and starts client
-test/e2e/     smoke.sh: boots echo + server + client locally, asserts full data path
+test/e2e/     smoke.sh: boots echo + server + two clients locally, asserts full data path and isolation
 ```
 
 ## Configuration model
@@ -90,14 +94,18 @@ Control frame types (see `internal/protocol`):
 
 ## Server internals
 
-- One active WebSocket session at a time (single-tenant v1)
-- Incoming pod connections on the bridge port → server calls `mux.OpenStream(id, target)` → sends `open` frame to client
+- **Multi-tenant:** multiple clients connect simultaneously; each `clientID` has exactly one persistent `*session` in `sessions map[string]*session`
+- A `session` persists across reconnects — only the `conn`/`send` fields are swapped; bridge listener and `registeredCh` remain stable
+- `session.swapConn(conn, send, authID, sessionID)` installs the new connection atomically and returns the previous conn/send so the caller can close them
+- Incoming pod connections on the bridge port → server calls `sess.openStream(id, target)` → sends `open` frame to client
 - Client responds with `open_ack` → bridge starts relaying bytes
-- Data frames shuttle raw bytes bidirectionally over the single WebSocket connection
-- `HeartbeatTracker` tracks liveness; no heartbeat within timeout → session closed
-- `kube.Reconciler` creates/updates/deletes a `Service` per client on connect/disconnect
+- Data frames shuttle raw bytes bidirectionally over the single WebSocket connection per client
+- `HeartbeatTracker` tracks liveness per session; no heartbeat within timeout → connection closed (session stays, client can reconnect)
+- Bridge listeners are started once per session (`bridgeOnce`) and bind to `host:0` (random port); actual address available via `sess.getBridgeAddr()`
+- `GET /api/clients/{clientID}/bridge-addr` exposes the per-client bridge listener address as plain text
+- `kube.Reconciler` creates/updates/deletes a `Service` per client on connect/disconnect, using the actual dynamic bridge port
 - Stale-sweep goroutine runs on `SweepInterval`; deletes Services for clients disconnected longer than `StaleServiceAge`
-- `/healthz` and `/metrics` are served on the same port as `/ws`
+- `/healthz`, `/metrics`, `/api/clients/`, and `/ws` are all served on the same port (`--server-addr`)
 
 ## Client internals
 
@@ -146,18 +154,19 @@ Makefile variables mirror flag names without the `BURROW_` prefix (e.g. `JWT_HMA
 
 **Implemented and tested:**
 - Full WebSocket tunnel (register, heartbeat, stream open/close, data relay)
+- Multi-tenant server: multiple simultaneous clients, each with isolated session and bridge listener
 - JWT authentication (HMAC, RSA, EC, EdDSA, JWKS with refresh)
 - Identity binding (`sub` == `client_id`)
 - Auth-aware retry backoff on the client
-- TCP bridge listener (pod → server → client → local service)
-- Kubernetes Service reconciler with stale sweep
+- TCP bridge listener per client (pod → server → client → local service); random port, discovered via `/api/clients/{id}/bridge-addr`
+- Kubernetes Service reconciler with dynamic bridge port and stale sweep
 - Mode-specific config validation
 - Structured logging (logrus throughout)
 - Metrics endpoint
-- Integration tests for relay, bridge, reconnect, auth rejection
+- Integration tests for relay, bridge, reconnect, auth rejection, two-client simultaneous isolation
+- e2e smoke test with dynamic bridge discovery and two-client isolation scenario
 
-**Intentionally excluded from v1:**
-- Multi-tenant isolation (only one active client session at a time)
+**Intentionally excluded:**
 - Multiple services per client
 - HA / session state replication
 - OIDC, mTLS

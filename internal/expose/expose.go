@@ -189,14 +189,17 @@ func buildKubeClient(kubeContext, namespace string) (kubernetes.Interface, strin
 }
 
 // DeleteSession deletes all Kubernetes resources created by a previous
-// burrow expose session for the given client ID.
-func DeleteSession(ctx context.Context, clientID, namespace, kubeContext string, logger *logrus.Logger) error {
+// burrow expose session. serverName identifies the Kubernetes resources
+// (was the --server-name or --client-id used at deploy time). clientID is
+// optional: when non-empty, reconciler-created client Services labelled with
+// that client ID are also removed.
+func DeleteSession(ctx context.Context, serverName, clientID, namespace, kubeContext string, logger *logrus.Logger) error {
 	kc, resolvedNS, err := buildKubeClient(kubeContext, namespace)
 	if err != nil {
 		return fmt.Errorf("building Kubernetes client: %w", err)
 	}
-	cfg := &Config{ClientID: clientID, Namespace: resolvedNS}
-	logger.Infof("deleting expose resources for client-id %q in namespace %q", clientID, resolvedNS)
+	cfg := &Config{ServerName: serverName, ClientID: clientID, Namespace: resolvedNS}
+	logger.Infof("deleting expose resources for server %q in namespace %q", serverName, resolvedNS)
 	return newDeployer(cfg, kc).Delete(ctx)
 }
 

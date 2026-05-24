@@ -3,18 +3,20 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 is required for e2e smoke tests" >&2
-  exit 1
-fi
-if ! command -v curl >/dev/null 2>&1; then
-  echo "curl is required for e2e smoke tests" >&2
-  exit 1
-fi
-if ! command -v nc >/dev/null 2>&1; then
-  echo "nc is required for e2e smoke tests" >&2
-  exit 1
-fi
+# ---------------------------------------------------------------------------
+# Dependency checks
+# ---------------------------------------------------------------------------
+
+for cmd in python3 curl nc; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "$cmd is required for e2e smoke tests" >&2
+    exit 1
+  fi
+done
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 reserve_port() {
   python3 - <<'PY'
@@ -62,10 +64,27 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+  if [[ "$haystack" == *"$needle"* ]]; then
+    echo "assert failed: expected output NOT to contain '$needle'" >&2
+    exit 1
+  fi
+}
+
 send_payload() {
   local payload="$1"
-  local bridge_port="$2"
-  printf "%s" "$payload" | nc -w 2 127.0.0.1 "$bridge_port" || true
+  local addr="$2"           # host:port or just port (127.0.0.1 assumed)
+  local host port
+  if [[ "$addr" == *:* ]]; then
+    host="${addr%%:*}"
+    port="${addr##*:}"
+  else
+    host="127.0.0.1"
+    port="$addr"
+  fi
+  printf "%s" "$payload" | nc -w 2 "$host" "$port" || true
 }
 
 mint_bearer_token() {
@@ -112,14 +131,39 @@ print(".".join([segments[0], segments[1], b64url(sig)]))
 PY
 }
 
+# Returns the bridge address for a connected client from the server API.
+get_bridge_addr() {
+  local server_port="$1"
+  local client_id="$2"
+  curl -fsS "http://127.0.0.1:${server_port}/api/clients/${client_id}/bridge-addr" 2>/dev/null || true
+}
+
+# Polls until the server exposes a bridge address for client_id, then
+# prints it and returns 0. Returns 1 on timeout.
+wait_for_bridge_addr() {
+  local server_port="$1"
+  local client_id="$2"
+  local attempts="${3:-80}"
+  local i addr
+  for ((i = 1; i <= attempts; i++)); do
+    addr="$(get_bridge_addr "$server_port" "$client_id")"
+    if [[ -n "$addr" ]]; then
+      echo "$addr"
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
 wait_for_tunnel_echo() {
   local payload="$1"
-  local bridge_port="$2"
+  local bridge_addr="$2"
   local attempts="${3:-40}"
   local i
   for ((i = 1; i <= attempts; i++)); do
     local out
-    out="$(send_payload "$payload" "$bridge_port")"
+    out="$(send_payload "$payload" "$bridge_addr")"
     if [[ "$out" == "$payload" ]]; then
       return 0
     fi
@@ -128,14 +172,15 @@ wait_for_tunnel_echo() {
   return 1
 }
 
+# Returns 0 once the bridge no longer echoes the payload (client disconnected).
 wait_for_tunnel_down() {
   local payload="$1"
-  local bridge_port="$2"
+  local bridge_addr="$2"
   local attempts="${3:-40}"
   local i
   for ((i = 1; i <= attempts; i++)); do
     local out
-    out="$(send_payload "$payload" "$bridge_port")"
+    out="$(send_payload "$payload" "$bridge_addr")"
     if [[ "$out" != "$payload" ]]; then
       return 0
     fi
@@ -167,49 +212,14 @@ wait_for_metric_equals() {
   return 1
 }
 
-cleanup() {
-  set +e
-  [[ -n "${CLIENT_PID:-}" ]] && kill_tree "$CLIENT_PID" || true
-  [[ -n "${SERVER_PID:-}" ]] && kill_tree "$SERVER_PID" || true
-  [[ -n "${ECHO_PID:-}" ]] && kill "$ECHO_PID" >/dev/null 2>&1 || true
-  wait >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
-
-kill_tree() {
-  local pid="$1"
-  if [[ -z "$pid" ]]; then
-    return 0
-  fi
-  pkill -TERM -P "$pid" >/dev/null 2>&1 || true
-  kill -TERM "$pid" >/dev/null 2>&1 || true
-}
-
-JWT_SECRET="${JWT_SECRET:-dev-secret}"
-JWT_AUDIENCE="${JWT_AUDIENCE:-burrow-server}"
-JWT_ISSUER="${JWT_ISSUER:-dev-local}"
-SERVER_PORT="${SERVER_PORT:-$(reserve_port)}"
-BRIDGE_PORT="${BRIDGE_PORT:-$(reserve_port)}"
-TARGET_PORT="${TARGET_PORT:-$(reserve_port)}"
-CLIENT_ID="${CLIENT_ID:-client-e2e}"
-
-SERVER_ADDR="127.0.0.1:${SERVER_PORT}"
-BRIDGE_ADDR="127.0.0.1:${BRIDGE_PORT}"
-SERVER_URL="ws://127.0.0.1:${SERVER_PORT}/ws"
-LOCAL_TARGET="127.0.0.1:${TARGET_PORT}"
-CLIENT_BEARER_TOKEN="$(mint_bearer_token "$CLIENT_ID" "$JWT_AUDIENCE" "$JWT_ISSUER" "$JWT_SECRET" 300)"
-
-echo "[e2e] starting local tcp echo target on ${LOCAL_TARGET}"
-python3 - <<PY >/tmp/burrow-e2e-echo.log 2>&1 &
-import socket
-import threading
-
-HOST = "127.0.0.1"
-PORT = ${TARGET_PORT}
+start_echo_server() {
+  local port="$1"
+  python3 - <<PY >/tmp/burrow-e2e-echo-${port}.log 2>&1 &
+import socket, threading
 
 srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-srv.bind((HOST, PORT))
+srv.bind(("127.0.0.1", ${port}))
 srv.listen(64)
 
 def handle(conn):
@@ -224,17 +234,94 @@ def handle(conn):
 
 while True:
     conn, _ = srv.accept()
-    t = threading.Thread(target=handle, args=(conn,), daemon=True)
-    t.start()
+    threading.Thread(target=handle, args=(conn,), daemon=True).start()
 PY
-ECHO_PID=$!
-
-wait_for_tcp 127.0.0.1 "$TARGET_PORT" 80 || {
-  echo "[e2e] echo target did not start" >&2
-  exit 1
+  echo $!
 }
 
-echo "[e2e] starting tunnel server on ${SERVER_ADDR} (bridge ${BRIDGE_ADDR})"
+start_client() {
+  local client_id="$1"
+  local server_url="$2"
+  local local_target="$3"
+  local token="$4"
+  local log_suffix="${5:-$client_id}"
+  (
+    cd "$ROOT_DIR"
+    BURROW_JWT_ALG="HS256" \
+    BURROW_JWT_HMAC_SECRET="$JWT_SECRET" \
+    BURROW_JWT_ISSUER="$JWT_ISSUER" \
+    BURROW_JWT_AUDIENCE="$JWT_AUDIENCE" \
+    BURROW_BEARER_TOKEN="$token" \
+    BURROW_SERVER_URL="$server_url" \
+    BURROW_CLIENT_ID="$client_id" \
+    BURROW_LOCAL_TARGET="$local_target" \
+    exec go run ./cmd/root client
+  ) >"/tmp/burrow-e2e-client-${log_suffix}.log" 2>&1 &
+  echo $!
+}
+
+# ---------------------------------------------------------------------------
+# Cleanup
+# ---------------------------------------------------------------------------
+
+cleanup() {
+  set +e
+  [[ -n "${CLIENT_PID:-}"   ]] && kill_tree "$CLIENT_PID"   || true
+  [[ -n "${CLIENT_B_PID:-}" ]] && kill_tree "$CLIENT_B_PID" || true
+  [[ -n "${SERVER_PID:-}"   ]] && kill_tree "$SERVER_PID"   || true
+  [[ -n "${ECHO_PID:-}"     ]] && kill "$ECHO_PID"  >/dev/null 2>&1 || true
+  [[ -n "${ECHO_B_PID:-}"   ]] && kill "$ECHO_B_PID" >/dev/null 2>&1 || true
+  wait >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+kill_tree() {
+  local pid="$1"
+  [[ -z "$pid" ]] && return 0
+  pkill -TERM -P "$pid" >/dev/null 2>&1 || true
+  kill -TERM  "$pid"    >/dev/null 2>&1 || true
+}
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+JWT_SECRET="${JWT_SECRET:-dev-secret}"
+JWT_AUDIENCE="${JWT_AUDIENCE:-burrow-server}"
+JWT_ISSUER="${JWT_ISSUER:-dev-local}"
+SERVER_PORT="${SERVER_PORT:-$(reserve_port)}"
+TARGET_PORT="${TARGET_PORT:-$(reserve_port)}"
+TARGET_PORT_B="${TARGET_PORT_B:-$(reserve_port)}"
+CLIENT_ID="${CLIENT_ID:-client-e2e}"
+CLIENT_ID_B="${CLIENT_ID_B:-client-e2e-b}"
+
+SERVER_ADDR="127.0.0.1:${SERVER_PORT}"
+# Bridge addr uses host-only (port 0 = random per client)
+BRIDGE_BIND="127.0.0.1"
+SERVER_URL="ws://127.0.0.1:${SERVER_PORT}/ws"
+METRICS_URL="http://127.0.0.1:${SERVER_PORT}/metrics"
+LOCAL_TARGET="127.0.0.1:${TARGET_PORT}"
+LOCAL_TARGET_B="127.0.0.1:${TARGET_PORT_B}"
+
+CLIENT_PID=""
+CLIENT_B_PID=""
+SERVER_PID=""
+ECHO_PID=""
+ECHO_B_PID=""
+
+# ---------------------------------------------------------------------------
+# Start infrastructure
+# ---------------------------------------------------------------------------
+
+echo "[e2e] starting echo server A on ${LOCAL_TARGET}"
+ECHO_PID="$(start_echo_server "$TARGET_PORT")"
+wait_for_tcp 127.0.0.1 "$TARGET_PORT" 80 || { echo "[e2e] echo server A did not start" >&2; exit 1; }
+
+echo "[e2e] starting echo server B on ${LOCAL_TARGET_B}"
+ECHO_B_PID="$(start_echo_server "$TARGET_PORT_B")"
+wait_for_tcp 127.0.0.1 "$TARGET_PORT_B" 80 || { echo "[e2e] echo server B did not start" >&2; exit 1; }
+
+echo "[e2e] starting tunnel server on ${SERVER_ADDR} (bridge bind ${BRIDGE_BIND})"
 (
   cd "$ROOT_DIR"
   BURROW_JWT_ALG="HS256" \
@@ -242,80 +329,108 @@ echo "[e2e] starting tunnel server on ${SERVER_ADDR} (bridge ${BRIDGE_ADDR})"
   BURROW_JWT_ISSUER="$JWT_ISSUER" \
   BURROW_JWT_AUDIENCE="$JWT_AUDIENCE" \
   BURROW_SERVER_ADDR="$SERVER_ADDR" \
-  BURROW_BRIDGE_ADDR="$BRIDGE_ADDR" \
+  BURROW_BRIDGE_HOST="$BRIDGE_BIND" \
   exec go run ./cmd/root server
 ) >/tmp/burrow-e2e-server.log 2>&1 &
 SERVER_PID=$!
 
 wait_for_http_ok "http://127.0.0.1:${SERVER_PORT}/healthz" 100 || {
-  echo "[e2e] server health check failed" >&2
-  exit 1
+  echo "[e2e] server health check failed" >&2; exit 1
 }
 
-echo "[e2e] starting tunnel client to ${SERVER_URL}"
-(
-  cd "$ROOT_DIR"
-  BURROW_JWT_ALG="HS256" \
-  BURROW_JWT_HMAC_SECRET="$JWT_SECRET" \
-  BURROW_JWT_ISSUER="$JWT_ISSUER" \
-  BURROW_JWT_AUDIENCE="$JWT_AUDIENCE" \
-  BURROW_BEARER_TOKEN="$CLIENT_BEARER_TOKEN" \
-  BURROW_SERVER_URL="$SERVER_URL" \
-  BURROW_CLIENT_ID="$CLIENT_ID" \
-  BURROW_LOCAL_TARGET="$LOCAL_TARGET" \
-  exec go run ./cmd/root client
-) >/tmp/burrow-e2e-client.log 2>&1 &
-CLIENT_PID=$!
+# ---------------------------------------------------------------------------
+# Single-client: data path + metrics
+# ---------------------------------------------------------------------------
 
-wait_for_tcp 127.0.0.1 "$BRIDGE_PORT" 100 || {
-  echo "[e2e] bridge listener not reachable" >&2
-  exit 1
+echo "[e2e] ── test: single client data path ──"
+
+TOKEN_A="$(mint_bearer_token "$CLIENT_ID" "$JWT_AUDIENCE" "$JWT_ISSUER" "$JWT_SECRET" 300)"
+CLIENT_PID="$(start_client "$CLIENT_ID" "$SERVER_URL" "$LOCAL_TARGET" "$TOKEN_A")"
+
+echo "[e2e] waiting for bridge address for ${CLIENT_ID}"
+BRIDGE_ADDR_A="$(wait_for_bridge_addr "$SERVER_PORT" "$CLIENT_ID" 100)" || {
+  echo "[e2e] bridge address for ${CLIENT_ID} not available" >&2; exit 1
+}
+BRIDGE_PORT_A="${BRIDGE_ADDR_A##*:}"
+echo "[e2e]   bridge A: ${BRIDGE_ADDR_A}"
+
+wait_for_tcp 127.0.0.1 "$BRIDGE_PORT_A" 100 || {
+  echo "[e2e] bridge listener A not reachable" >&2; exit 1
 }
 
 echo "[e2e] validating /metrics endpoint"
-metrics="$(curl -fsS "http://127.0.0.1:${SERVER_PORT}/metrics")"
-METRICS_URL="http://127.0.0.1:${SERVER_PORT}/metrics"
+metrics="$(curl -fsS "$METRICS_URL")"
 assert_contains "$metrics" "burrow_sessions_active"
 assert_contains "$metrics" "burrow_streams_active"
 assert_contains "$metrics" "burrow_stale_services_deleted_total"
+assert_contains "$metrics" "burrow_stream_backpressure_drops_total"
 
-echo "[e2e] validating tunnel data path"
-if ! wait_for_tunnel_echo "smoke-ok" "$BRIDGE_PORT" 60; then
-  echo "[e2e] tunnel echo check failed" >&2
-  exit 1
+echo "[e2e] validating tunnel data path for ${CLIENT_ID}"
+if ! wait_for_tunnel_echo "smoke-ok" "$BRIDGE_ADDR_A" 60; then
+  echo "[e2e] tunnel echo check failed for client A" >&2; exit 1
 fi
 
-echo "[e2e] simulating client failure"
+# ---------------------------------------------------------------------------
+# Two simultaneous clients: stream isolation
+# ---------------------------------------------------------------------------
+
+echo "[e2e] ── test: two simultaneous clients ──"
+
+TOKEN_B="$(mint_bearer_token "$CLIENT_ID_B" "$JWT_AUDIENCE" "$JWT_ISSUER" "$JWT_SECRET" 300)"
+CLIENT_B_PID="$(start_client "$CLIENT_ID_B" "$SERVER_URL" "$LOCAL_TARGET_B" "$TOKEN_B" "b")"
+
+echo "[e2e] waiting for bridge address for ${CLIENT_ID_B}"
+BRIDGE_ADDR_B="$(wait_for_bridge_addr "$SERVER_PORT" "$CLIENT_ID_B" 100)" || {
+  echo "[e2e] bridge address for ${CLIENT_ID_B} not available" >&2; exit 1
+}
+BRIDGE_PORT_B="${BRIDGE_ADDR_B##*:}"
+echo "[e2e]   bridge B: ${BRIDGE_ADDR_B}"
+
+wait_for_tcp 127.0.0.1 "$BRIDGE_PORT_B" 100 || {
+  echo "[e2e] bridge listener B not reachable" >&2; exit 1
+}
+
+echo "[e2e] verifying isolated echo: payload-a arrives only on bridge A"
+if ! wait_for_tunnel_echo "payload-a" "$BRIDGE_ADDR_A" 40; then
+  echo "[e2e] echo check failed for client A (isolation test)" >&2; exit 1
+fi
+if ! wait_for_tunnel_echo "payload-b" "$BRIDGE_ADDR_B" 40; then
+  echo "[e2e] echo check failed for client B (isolation test)" >&2; exit 1
+fi
+
+echo "[e2e] verifying session metric shows 2 active sessions"
+if ! wait_for_metric_equals "$METRICS_URL" "burrow_sessions_active" "2" 60; then
+  got="$(metric_value "$METRICS_URL" "burrow_sessions_active" || true)"
+  echo "[e2e] expected 2 active sessions, got ${got}" >&2; exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Single client failure + reconnect
+# ---------------------------------------------------------------------------
+
+echo "[e2e] ── test: client failure and reconnect ──"
+
+echo "[e2e] killing client A to simulate failure"
 kill_tree "$CLIENT_PID"
 wait "$CLIENT_PID" >/dev/null 2>&1 || true
 CLIENT_PID=""
-sleep 0.5
 
-echo "[e2e] ensuring bridge does not pass traffic while client is down"
-if ! wait_for_tunnel_down "should-fail" "$BRIDGE_PORT" 40; then
-  echo "[e2e] expected no echo while client is down" >&2
-  exit 1
+echo "[e2e] ensuring bridge A does not pass traffic while client A is down"
+if ! wait_for_tunnel_down "should-fail" "$BRIDGE_ADDR_A" 40; then
+  echo "[e2e] expected no echo on bridge A while client A is down" >&2; exit 1
 fi
 
-echo "[e2e] restarting client to validate recovery"
-CLIENT_BEARER_TOKEN="$(mint_bearer_token "$CLIENT_ID" "$JWT_AUDIENCE" "$JWT_ISSUER" "$JWT_SECRET" 300)"
-(
-  cd "$ROOT_DIR"
-  BURROW_JWT_ALG="HS256" \
-  BURROW_JWT_HMAC_SECRET="$JWT_SECRET" \
-  BURROW_JWT_ISSUER="$JWT_ISSUER" \
-  BURROW_JWT_AUDIENCE="$JWT_AUDIENCE" \
-  BURROW_BEARER_TOKEN="$CLIENT_BEARER_TOKEN" \
-  BURROW_SERVER_URL="$SERVER_URL" \
-  BURROW_CLIENT_ID="$CLIENT_ID" \
-  BURROW_LOCAL_TARGET="$LOCAL_TARGET" \
-  exec go run ./cmd/root client
-) >/tmp/burrow-e2e-client.log 2>&1 &
-CLIENT_PID=$!
-
-if ! wait_for_tunnel_echo "recover-ok" "$BRIDGE_PORT" 80; then
-  echo "[e2e] reconnect recovery check failed" >&2
-  exit 1
+echo "[e2e] verifying client B is unaffected while client A is down"
+if ! wait_for_tunnel_echo "b-unaffected" "$BRIDGE_ADDR_B" 40; then
+  echo "[e2e] client B echo failed while client A was down" >&2; exit 1
 fi
 
-echo "[e2e] success: smoke and failure/recovery checks passed"
+echo "[e2e] restarting client A to validate recovery"
+TOKEN_A="$(mint_bearer_token "$CLIENT_ID" "$JWT_AUDIENCE" "$JWT_ISSUER" "$JWT_SECRET" 300)"
+CLIENT_PID="$(start_client "$CLIENT_ID" "$SERVER_URL" "$LOCAL_TARGET" "$TOKEN_A" "reconnect")"
+
+if ! wait_for_tunnel_echo "recover-ok" "$BRIDGE_ADDR_A" 80; then
+  echo "[e2e] reconnect recovery check failed for client A" >&2; exit 1
+fi
+
+echo "[e2e] ── all checks passed ──"

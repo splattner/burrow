@@ -26,7 +26,11 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
   # Dry-run: print resources without deploying
   burrow expose --client-id api --local-target 127.0.0.1:8080 --dry-run
 
-  # Re-use an existing server deployment
+  # Deploy a named server, then reuse it for a second client
+  burrow expose --server-name prod-tunnel --client-id pg --local-target 127.0.0.1:5432
+  burrow expose --server-name prod-tunnel --client-id redis --local-target 127.0.0.1:6379 --reuse
+
+  # Re-use an existing server deployment (single client)
   burrow expose --client-id api --local-target 127.0.0.1:8080 --reuse
 
   # Set resource requests/limits on the server container via a strategic merge patch
@@ -53,6 +57,7 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 
 	flags := cmd.Flags()
 	flags.String("client-id", "", "Unique client ID (required)")
+	flags.String("server-name", "", "Kubernetes resource name for the server deployment (defaults to --client-id; use to share one server across multiple clients)")
 	flags.String("local-target", "", "Local host:port to forward tunnel traffic to (required)")
 	flags.String("kube-context", "", "Kubernetes context to use (default: current context)")
 	flags.String("namespace", "", "Kubernetes namespace (default: context namespace)")
@@ -62,7 +67,6 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 	flags.StringArray("ingress-annotation", nil, "Extra Ingress annotation in key=value format (repeatable)")
 	flags.String("image", defaultImage, "Container image for the burrow server")
 	flags.Int("server-port", 8080, "Port the server listens on inside the container")
-	flags.Int("bridge-port", 1111, "Port the bridge listener uses inside the container")
 	flags.Bool("reuse", false, "Connect to an existing burrow server deployment instead of creating one")
 	flags.Bool("keep", false, "Leave server resources in Kubernetes after the tunnel closes")
 	flags.Duration("wait-timeout", 2*time.Minute, "Maximum time to wait for the server to become available")
@@ -84,26 +88,36 @@ func newDeleteCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete",
 		Short: "Delete Kubernetes resources created by burrow expose",
-		Example: `  # Delete resources in the current context namespace
+		Example: `  # Delete by client ID (backward compatible)
   burrow expose delete --client-id pg
 
+  # Delete by server name (shared server deployment)
+  burrow expose delete --server-name prod-tunnel
+
   # Delete in a specific namespace and context
-  burrow expose delete --client-id pg --namespace staging --kube-context prod`,
+  burrow expose delete --server-name prod-tunnel --namespace staging --kube-context prod`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			flags := cmd.Flags()
 			clientID, _ := flags.GetString("client-id")
+			serverName, _ := flags.GetString("server-name")
 			namespace, _ := flags.GetString("namespace")
 			kubeContext, _ := flags.GetString("kube-context")
+			if serverName == "" {
+				serverName = clientID
+			}
+			if serverName == "" {
+				return fmt.Errorf("either --server-name or --client-id is required")
+			}
 			logger := logging.New(v.GetString("log-level"))
-			return exposepkg.DeleteSession(ctx, clientID, namespace, kubeContext, logger)
+			return exposepkg.DeleteSession(ctx, serverName, clientID, namespace, kubeContext, logger)
 		},
 	}
 
 	flags := cmd.Flags()
-	flags.String("client-id", "", "Client ID of the session to delete (required)")
+	flags.String("server-name", "", "Server name to delete (use the --server-name given at deploy time)")
+	flags.String("client-id", "", "Client ID used at deploy time; fallback if --server-name is not set")
 	flags.String("namespace", "", "Kubernetes namespace (default: context namespace)")
 	flags.String("kube-context", "", "Kubernetes context to use (default: current context)")
-	_ = cmd.MarkFlagRequired("client-id")
 	return cmd
 }
 
@@ -111,6 +125,10 @@ func buildConfig(cmd *cobra.Command) (*exposepkg.Config, error) {
 	flags := cmd.Flags()
 
 	clientID, _ := flags.GetString("client-id")
+	serverName, _ := flags.GetString("server-name")
+	if serverName == "" {
+		serverName = clientID
+	}
 	localTarget, _ := flags.GetString("local-target")
 	kubeContext, _ := flags.GetString("kube-context")
 	namespace, _ := flags.GetString("namespace")
@@ -120,7 +138,6 @@ func buildConfig(cmd *cobra.Command) (*exposepkg.Config, error) {
 	rawAnnotations, _ := flags.GetStringArray("ingress-annotation")
 	image, _ := flags.GetString("image")
 	serverPort, _ := flags.GetInt("server-port")
-	bridgePort, _ := flags.GetInt("bridge-port")
 	reuse, _ := flags.GetBool("reuse")
 	keep, _ := flags.GetBool("keep")
 	waitTimeout, _ := flags.GetDuration("wait-timeout")
@@ -144,6 +161,7 @@ func buildConfig(cmd *cobra.Command) (*exposepkg.Config, error) {
 
 	return &exposepkg.Config{
 		ClientID:           clientID,
+		ServerName:         serverName,
 		LocalTarget:        localTarget,
 		KubeContext:        kubeContext,
 		Namespace:          namespace,
@@ -153,7 +171,6 @@ func buildConfig(cmd *cobra.Command) (*exposepkg.Config, error) {
 		IngressAnnotations: annotations,
 		Image:              image,
 		ServerPort:         serverPort,
-		BridgePort:         bridgePort,
 		Reuse:              reuse,
 		Keep:               keep,
 		WaitTimeout:        waitTimeout,

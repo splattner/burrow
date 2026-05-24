@@ -82,7 +82,6 @@ func (c *Config) buildRoleBinding() *rbacv1.RoleBinding {
 func (c *Config) buildDeployment() (*appsv1.Deployment, error) {
 	replicas := int32(1)
 	serverPort := int32(c.ServerPort)
-	bridgePort := int32(c.BridgePort)
 
 	d := &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
@@ -121,7 +120,8 @@ func (c *Config) buildDeployment() (*appsv1.Deployment, error) {
 								{Name: "BURROW_JWT_AUDIENCE", Value: jwtAudience},
 								{Name: "BURROW_JWT_ISSUER", Value: jwtIssuer},
 								{Name: "BURROW_SERVER_ADDR", Value: ":" + strconv.Itoa(c.ServerPort)},
-								{Name: "BURROW_BRIDGE_ADDR", Value: ":" + strconv.Itoa(c.BridgePort)},
+								// BURROW_BRIDGE_HOST sets the bind host; each client gets a random port.
+								{Name: "BURROW_BRIDGE_HOST", Value: "0.0.0.0"},
 								{
 									Name: "BURROW_NAMESPACE",
 									ValueFrom: &corev1.EnvVarSource{
@@ -132,7 +132,6 @@ func (c *Config) buildDeployment() (*appsv1.Deployment, error) {
 							},
 							Ports: []corev1.ContainerPort{
 								{Name: "http", ContainerPort: serverPort, Protocol: corev1.ProtocolTCP},
-								{Name: "bridge", ContainerPort: bridgePort, Protocol: corev1.ProtocolTCP},
 							},
 							ReadinessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{

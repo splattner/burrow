@@ -17,7 +17,7 @@ func TestStaleSweepLoopRemovesDisconnectedClient(t *testing.T) {
 	}, logging.NoOp())
 
 	ctx := context.Background()
-	if _, err := s.kube.EnsureClientService(ctx, "client-sweep", "127.0.0.1:5432"); err != nil {
+	if _, err := s.kube.EnsureClientService(ctx, "client-sweep", "127.0.0.1:5432", 0); err != nil {
 		t.Fatalf("ensure client service: %v", err)
 	}
 	if err := s.kube.MarkClientDisconnected(ctx, "client-sweep"); err != nil {
@@ -63,7 +63,7 @@ func TestStaleSweepLoopKeepsRecentlyDisconnectedClient(t *testing.T) {
 	}, logging.NoOp())
 
 	ctx := context.Background()
-	if _, err := s.kube.EnsureClientService(ctx, "client-fresh", "127.0.0.1:6000"); err != nil {
+	if _, err := s.kube.EnsureClientService(ctx, "client-fresh", "127.0.0.1:6000", 0); err != nil {
 		t.Fatalf("ensure client service: %v", err)
 	}
 	if err := s.kube.MarkClientDisconnected(ctx, "client-fresh"); err != nil {

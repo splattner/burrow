@@ -82,6 +82,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/metrics", s.handleMetrics)
+	mux.HandleFunc("/api/clients/", s.handleClientAPI)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -662,6 +663,35 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 		s.metrics.StaleServicesDeleted(),
 		s.metrics.StreamBackpressureDrops(),
 	)
+}
+
+// handleClientAPI serves /api/clients/{clientID}/bridge-addr.
+// Returns the bridge listener address for a connected client as plain text,
+// or 404 if the client is not connected or has no bridge listener yet.
+func (s *Server) handleClientAPI(w http.ResponseWriter, r *http.Request) {
+	// Expect path: /api/clients/{clientID}/bridge-addr
+	path := strings.TrimPrefix(r.URL.Path, "/api/clients/")
+	clientID, suffix, ok := strings.Cut(path, "/")
+	if !ok || suffix != "bridge-addr" || clientID == "" {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	s.sessionsMu.RLock()
+	sess := s.sessions[clientID]
+	s.sessionsMu.RUnlock()
+
+	if sess == nil {
+		http.Error(w, "client not found", http.StatusNotFound)
+		return
+	}
+	addr := sess.getBridgeAddr()
+	if addr == "" {
+		http.Error(w, "no bridge listener", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = fmt.Fprint(w, addr)
 }
 
 // ---------------------------------------------------------------------------

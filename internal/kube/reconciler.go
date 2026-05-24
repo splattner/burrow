@@ -330,7 +330,6 @@ func buildService(record ServiceRecord) *corev1.Service {
 	}
 }
 
-
 func newKubeClient(explicitEnable *bool) (kubernetes.Interface, error) {
 	enable := ""
 	if explicitEnable != nil {

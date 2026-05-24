@@ -76,7 +76,7 @@ func TestServerClientRelayWithLocalEcho(t *testing.T) {
 		clientErr <- cli.Run(cliCtx)
 	}()
 
-	if !srv.WaitForClient("client-a", 5 * time.Second) {
+	if !srv.WaitForClient("client-a", 5*time.Second) {
 		t.Fatal("server did not observe a registered client")
 	}
 
@@ -166,7 +166,7 @@ func TestServerBridgeListenerRelaysToClient(t *testing.T) {
 		clientErr <- cli.Run(cliCtx)
 	}()
 
-	if !srv.WaitForClient("client-a", 5 * time.Second) {
+	if !srv.WaitForClient("client-a", 5*time.Second) {
 		t.Fatal("server did not observe a registered client")
 	}
 
@@ -248,7 +248,7 @@ func TestServerClientReconnectReopensFreshStreams(t *testing.T) {
 	cli1 := clientpkg.New(clientCfg, logging.NoOp())
 	go func() { clientErr1 <- cli1.Run(clientCtx1) }()
 
-	if !srv.WaitForClient("client-reconnect", 5 * time.Second) {
+	if !srv.WaitForClient("client-reconnect", 5*time.Second) {
 		t.Fatal("server did not observe first client registration")
 	}
 
@@ -384,7 +384,7 @@ func TestServerRejectsRegisterWhenJWTSubjectMismatch(t *testing.T) {
 		clientErr <- cli.Run(cliCtx)
 	}()
 
-	if srv.WaitForClient("client-a", 2 * time.Second) {
+	if srv.WaitForClient("client-a", 2*time.Second) {
 		t.Fatal("expected server to reject client registration for mismatched jwt subject")
 	}
 

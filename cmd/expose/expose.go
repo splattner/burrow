@@ -26,7 +26,11 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
   # Dry-run: print resources without deploying
   burrow expose --client-id api --local-target 127.0.0.1:8080 --dry-run
 
-  # Re-use an existing server deployment
+  # Deploy a named server, then reuse it for a second client
+  burrow expose --server-name prod-tunnel --client-id pg --local-target 127.0.0.1:5432
+  burrow expose --server-name prod-tunnel --client-id redis --local-target 127.0.0.1:6379 --reuse
+
+  # Re-use an existing server deployment (single client)
   burrow expose --client-id api --local-target 127.0.0.1:8080 --reuse
 
   # Set resource requests/limits on the server container via a strategic merge patch

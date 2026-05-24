@@ -4,11 +4,9 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
-	"net"
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -56,9 +54,8 @@ type clientState struct {
 }
 
 type Reconciler struct {
-	namespace  string
-	client     kubernetes.Interface
-	bridgePort int32
+	namespace string
+	client    kubernetes.Interface
 
 	mu       sync.RWMutex
 	services map[string]ServiceRecord
@@ -66,33 +63,34 @@ type Reconciler struct {
 }
 
 func NewReconciler(namespace string) *Reconciler {
-	return NewReconcilerWithBridge(namespace, "")
+	return NewReconcilerWithOptions(namespace, nil)
 }
 
-func NewReconcilerWithBridge(namespace, bridgeAddr string) *Reconciler {
-	return NewReconcilerWithBridgeOptions(namespace, bridgeAddr, nil)
-}
-
-func NewReconcilerWithBridgeOptions(namespace, bridgeAddr string, enableKubeAPI *bool) *Reconciler {
+// NewReconcilerWithOptions creates a Reconciler with optional Kubernetes API access.
+func NewReconcilerWithOptions(namespace string, enableKubeAPI *bool) *Reconciler {
 	if strings.TrimSpace(namespace) == "" {
 		namespace = "default"
 	}
-
 	client, _ := newKubeClient(enableKubeAPI)
-	return NewReconcilerWithClient(namespace, bridgeAddr, client)
+	return NewReconcilerWithClient(namespace, client)
 }
 
-func NewReconcilerWithClient(namespace, bridgeAddr string, client kubernetes.Interface) *Reconciler {
+// NewReconcilerWithBridge is kept for backward compatibility; the bridgeAddr
+// parameter is ignored — bridge ports are now passed per EnsureClientService call.
+func NewReconcilerWithBridge(namespace, _ string) *Reconciler {
+	return NewReconcilerWithOptions(namespace, nil)
+}
+
+func NewReconcilerWithClient(namespace string, client kubernetes.Interface) *Reconciler {
 	if strings.TrimSpace(namespace) == "" {
 		namespace = "default"
 	}
 
 	return &Reconciler{
-		namespace:  namespace,
-		client:     client,
-		bridgePort: parseBridgePort(bridgeAddr),
-		services:   make(map[string]ServiceRecord),
-		clients:    make(map[string]clientState),
+		namespace: namespace,
+		client:    client,
+		services:  make(map[string]ServiceRecord),
+		clients:   make(map[string]clientState),
 	}
 }
 
@@ -101,7 +99,7 @@ func (r *Reconciler) EnsureInfrastructure(ctx context.Context) error {
 	return nil
 }
 
-func (r *Reconciler) EnsureClientService(ctx context.Context, clientID, target string) (ServiceRecord, error) {
+func (r *Reconciler) EnsureClientService(ctx context.Context, clientID, target string, bridgePort int32) (ServiceRecord, error) {
 	_ = ctx
 	if strings.TrimSpace(clientID) == "" {
 		return ServiceRecord{}, fmt.Errorf("client ID is required")
@@ -136,7 +134,7 @@ func (r *Reconciler) EnsureClientService(ctx context.Context, clientID, target s
 	r.mu.Unlock()
 
 	if r.client != nil {
-		if err := r.applyServiceRecord(ctx, record); err != nil {
+		if err := r.applyServiceRecord(ctx, record, bridgePort); err != nil {
 			return ServiceRecord{}, err
 		}
 	}
@@ -264,7 +262,7 @@ func copyMap(in map[string]string) map[string]string {
 	return out
 }
 
-func (r *Reconciler) applyServiceRecord(ctx context.Context, record ServiceRecord) error {
+func (r *Reconciler) applyServiceRecord(ctx context.Context, record ServiceRecord, bridgePort int32) error {
 	svcClient := r.client.CoreV1().Services(r.namespace)
 	existing, err := svcClient.Get(ctx, record.Name, metav1.GetOptions{})
 	if err != nil {
@@ -288,7 +286,9 @@ func (r *Reconciler) applyServiceRecord(ctx context.Context, record ServiceRecor
 	}
 
 	desired := buildService(record)
-	desired.Spec.Ports[0].TargetPort = intstr.FromInt32(r.bridgePort)
+	if bridgePort > 0 {
+		desired.Spec.Ports[0].TargetPort = intstr.FromInt32(bridgePort)
+	}
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		latest, getErr := svcClient.Get(ctx, existing.Name, metav1.GetOptions{})
 		if getErr != nil {
@@ -330,28 +330,6 @@ func buildService(record ServiceRecord) *corev1.Service {
 	}
 }
 
-func parseBridgePort(bridgeAddr string) int32 {
-	if strings.TrimSpace(bridgeAddr) == "" {
-		return defaultBridgePort
-	}
-
-	portStr := ""
-	if strings.Contains(bridgeAddr, ":") {
-		_, p, err := net.SplitHostPort(bridgeAddr)
-		if err == nil {
-			portStr = p
-		}
-	}
-	if portStr == "" {
-		portStr = strings.TrimPrefix(strings.TrimSpace(bridgeAddr), ":")
-	}
-
-	port, err := strconv.Atoi(portStr)
-	if err != nil || port <= 0 || port > 65535 {
-		return defaultBridgePort
-	}
-	return int32(port)
-}
 
 func newKubeClient(explicitEnable *bool) (kubernetes.Interface, error) {
 	enable := ""

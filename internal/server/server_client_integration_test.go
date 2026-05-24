@@ -76,17 +76,17 @@ func TestServerClientRelayWithLocalEcho(t *testing.T) {
 		clientErr <- cli.Run(cliCtx)
 	}()
 
-	if !srv.WaitForClient(5 * time.Second) {
+	if !srv.WaitForClient("client-a", 5 * time.Second) {
 		t.Fatal("server did not observe a registered client")
 	}
 
-	stream, err := srv.OpenStream(100, "")
+	stream, err := srv.OpenStream("client-a", 100, "")
 	if err != nil {
 		t.Fatalf("open stream: %v", err)
 	}
 
 	want := []byte("ping-through-tunnel")
-	if err := srv.SendData(100, want); err != nil {
+	if err := srv.SendData("client-a", 100, want); err != nil {
 		t.Fatalf("send data over tunnel: %v", err)
 	}
 
@@ -99,7 +99,7 @@ func TestServerClientRelayWithLocalEcho(t *testing.T) {
 		t.Fatal("timed out waiting for echoed payload")
 	}
 
-	_ = srv.CloseStream(100)
+	_ = srv.CloseStream("client-a", 100)
 
 	cancelClient()
 	select {
@@ -150,9 +150,6 @@ func TestServerBridgeListenerRelaysToClient(t *testing.T) {
 	if !srv.WaitUntilStarted(3 * time.Second) {
 		t.Fatal("server did not start listening in time")
 	}
-	if srv.BridgeAddr() == "" {
-		t.Fatal("bridge listener did not expose an address")
-	}
 
 	cli := clientpkg.New(config.Config{
 		BearerToken: token,
@@ -169,11 +166,15 @@ func TestServerBridgeListenerRelaysToClient(t *testing.T) {
 		clientErr <- cli.Run(cliCtx)
 	}()
 
-	if !srv.WaitForClient(5 * time.Second) {
+	if !srv.WaitForClient("client-a", 5 * time.Second) {
 		t.Fatal("server did not observe a registered client")
 	}
 
-	podConn, err := net.Dial("tcp", srv.BridgeAddr())
+	if srv.BridgeAddr("client-a") == "" {
+		t.Fatal("bridge listener did not expose an address")
+	}
+
+	podConn, err := net.Dial("tcp", srv.BridgeAddr("client-a"))
 	if err != nil {
 		t.Fatalf("dial bridge listener: %v", err)
 	}
@@ -247,15 +248,15 @@ func TestServerClientReconnectReopensFreshStreams(t *testing.T) {
 	cli1 := clientpkg.New(clientCfg, logging.NoOp())
 	go func() { clientErr1 <- cli1.Run(clientCtx1) }()
 
-	if !srv.WaitForClient(5 * time.Second) {
+	if !srv.WaitForClient("client-reconnect", 5 * time.Second) {
 		t.Fatal("server did not observe first client registration")
 	}
 
-	stream1, err := srv.OpenStream(401, "")
+	stream1, err := srv.OpenStream("client-reconnect", 401, "")
 	if err != nil {
 		t.Fatalf("open first stream: %v", err)
 	}
-	if err := srv.SendData(401, []byte("before-reconnect")); err != nil {
+	if err := srv.SendData("client-reconnect", 401, []byte("before-reconnect")); err != nil {
 		t.Fatalf("send first stream payload: %v", err)
 	}
 	select {
@@ -293,7 +294,7 @@ func TestServerClientReconnectReopensFreshStreams(t *testing.T) {
 	var openErr error
 	deadline := time.Now().Add(4 * time.Second)
 	for {
-		stream, err := srv.OpenStream(402, "")
+		stream, err := srv.OpenStream("client-reconnect", 402, "")
 		if err == nil {
 			stream2 = stream
 			break
@@ -305,7 +306,7 @@ func TestServerClientReconnectReopensFreshStreams(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	if err := srv.SendData(402, []byte("after-reconnect")); err != nil {
+	if err := srv.SendData("client-reconnect", 402, []byte("after-reconnect")); err != nil {
 		t.Fatalf("send second stream payload: %v", err)
 	}
 	select {
@@ -317,7 +318,7 @@ func TestServerClientReconnectReopensFreshStreams(t *testing.T) {
 		t.Fatal("timed out waiting for second stream response")
 	}
 
-	_ = srv.CloseStream(402)
+	_ = srv.CloseStream("client-reconnect", 402)
 
 	cancelClient2()
 	select {
@@ -383,7 +384,7 @@ func TestServerRejectsRegisterWhenJWTSubjectMismatch(t *testing.T) {
 		clientErr <- cli.Run(cliCtx)
 	}()
 
-	if srv.WaitForClient(2 * time.Second) {
+	if srv.WaitForClient("client-a", 2 * time.Second) {
 		t.Fatal("expected server to reject client registration for mismatched jwt subject")
 	}
 
@@ -459,4 +460,125 @@ func signedHMACTestToken(secret, subject string) (string, error) {
 	}
 	t := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return t.SignedString([]byte(secret))
+}
+
+// TestTwoClientsSimultaneous verifies that the server supports multiple
+// concurrent client sessions with fully isolated streams.
+func TestTwoClientsSimultaneous(t *testing.T) {
+	echoA, stopA := startTCPEcho(t)
+	defer stopA()
+	echoB, stopB := startTCPEcho(t)
+	defer stopB()
+
+	tokenA, err := signedHMACTestToken("jwt-secret", "client-alpha")
+	if err != nil {
+		t.Fatalf("sign token A: %v", err)
+	}
+	tokenB, err := signedHMACTestToken("jwt-secret", "client-beta")
+	if err != nil {
+		t.Fatalf("sign token B: %v", err)
+	}
+
+	srv := serverpkg.New(config.Config{
+		JWTAlg:        "HS256",
+		JWTHMACSecret: "jwt-secret",
+		JWTAudience:   "burrow-server",
+		ServerAddr:    "127.0.0.1:0",
+		Namespace:     "default",
+	}, logging.NoOp())
+
+	srvCtx, cancelServer := context.WithCancel(context.Background())
+	defer cancelServer()
+
+	serverErr := make(chan error, 1)
+	go func() { serverErr <- srv.Run(srvCtx) }()
+
+	if !srv.WaitUntilStarted(3 * time.Second) {
+		t.Fatal("server did not start listening in time")
+	}
+
+	cliA := clientpkg.New(config.Config{BearerToken: tokenA, ServerURL: srv.WSURL(), ClientID: "client-alpha", LocalTarget: echoA}, logging.NoOp())
+	cliB := clientpkg.New(config.Config{BearerToken: tokenB, ServerURL: srv.WSURL(), ClientID: "client-beta", LocalTarget: echoB}, logging.NoOp())
+
+	ctxA, cancelA := context.WithCancel(context.Background())
+	defer cancelA()
+	ctxB, cancelB := context.WithCancel(context.Background())
+	defer cancelB()
+
+	errA := make(chan error, 1)
+	errB := make(chan error, 1)
+	go func() { errA <- cliA.Run(ctxA) }()
+	go func() { errB <- cliB.Run(ctxB) }()
+
+	if !srv.WaitForClient("client-alpha", 5*time.Second) {
+		t.Fatal("server did not observe client-alpha registration")
+	}
+	if !srv.WaitForClient("client-beta", 5*time.Second) {
+		t.Fatal("server did not observe client-beta registration")
+	}
+
+	// Open isolated streams on each client.
+	streamA, err := srv.OpenStream("client-alpha", 201, "")
+	if err != nil {
+		t.Fatalf("open stream to client-alpha: %v", err)
+	}
+	streamB, err := srv.OpenStream("client-beta", 202, "")
+	if err != nil {
+		t.Fatalf("open stream to client-beta: %v", err)
+	}
+
+	payloadA := []byte("hello-alpha")
+	payloadB := []byte("hello-beta")
+
+	if err := srv.SendData("client-alpha", 201, payloadA); err != nil {
+		t.Fatalf("send to client-alpha: %v", err)
+	}
+	if err := srv.SendData("client-beta", 202, payloadB); err != nil {
+		t.Fatalf("send to client-beta: %v", err)
+	}
+
+	// Verify each stream gets its own echo back (not the other's payload).
+	for _, tc := range []struct {
+		name    string
+		stream  *tunnel.Stream
+		payload []byte
+	}{
+		{"alpha", streamA, payloadA},
+		{"beta", streamB, payloadB},
+	} {
+		select {
+		case got := <-tc.stream.In:
+			if string(got) != string(tc.payload) {
+				t.Fatalf("client-%s: unexpected echo: got=%q want=%q", tc.name, string(got), string(tc.payload))
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("timed out waiting for echo from client-%s", tc.name)
+		}
+	}
+
+	_ = srv.CloseStream("client-alpha", 201)
+	_ = srv.CloseStream("client-beta", 202)
+
+	cancelA()
+	cancelB()
+	for _, ch := range []chan error{errA, errB} {
+		select {
+		case err := <-ch:
+			if err != nil {
+				t.Fatalf("client error on stop: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("client did not stop after cancellation")
+		}
+	}
+
+	cancelServer()
+	select {
+	case err := <-serverErr:
+		if err != nil {
+			t.Fatalf("server exited with error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not stop after cancellation")
+	}
 }

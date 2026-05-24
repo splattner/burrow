@@ -26,10 +26,10 @@ func TestServiceNameForClientIsDeterministicAndBounded(t *testing.T) {
 }
 
 func TestReconcilerEnsureDisconnectAndSweep(t *testing.T) {
-	r := NewReconcilerWithBridge("default", "127.0.0.1:1111")
+	r := NewReconciler("default")
 	ctx := context.Background()
 
-	rec, err := r.EnsureClientService(ctx, "client-a", "127.0.0.1:5432")
+	rec, err := r.EnsureClientService(ctx, "client-a", "127.0.0.1:5432", 0)
 	if err != nil {
 		t.Fatalf("ensure client service: %v", err)
 	}
@@ -69,10 +69,10 @@ func TestReconcilerEnsureDisconnectAndSweep(t *testing.T) {
 func TestReconcilerKubeClientCreateAndUpdate(t *testing.T) {
 	ctx := context.Background()
 	fakeClient := fake.NewSimpleClientset()
-	r := NewReconcilerWithClient("default", "127.0.0.1:1111", fakeClient)
+	r := NewReconcilerWithClient("default", fakeClient)
 
 	firstTarget := "127.0.0.1:5432"
-	rec, err := r.EnsureClientService(ctx, "client-a", firstTarget)
+	rec, err := r.EnsureClientService(ctx, "client-a", firstTarget, 1111)
 	if err != nil {
 		t.Fatalf("ensure first service: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestReconcilerKubeClientCreateAndUpdate(t *testing.T) {
 	}
 
 	updatedTarget := "127.0.0.1:15432"
-	_, err = r.EnsureClientService(ctx, "client-a", updatedTarget)
+	_, err = r.EnsureClientService(ctx, "client-a", updatedTarget, 1111)
 	if err != nil {
 		t.Fatalf("ensure updated service: %v", err)
 	}
@@ -109,9 +109,9 @@ func TestReconcilerKubeClientCreateAndUpdate(t *testing.T) {
 func TestReconcilerKubeClientSweepDeletesService(t *testing.T) {
 	ctx := context.Background()
 	fakeClient := fake.NewSimpleClientset()
-	r := NewReconcilerWithClient("default", "127.0.0.1:1111", fakeClient)
+	r := NewReconcilerWithClient("default", fakeClient)
 
-	rec, err := r.EnsureClientService(ctx, "client-b", "127.0.0.1:9000")
+	rec, err := r.EnsureClientService(ctx, "client-b", "127.0.0.1:9000", 9001)
 	if err != nil {
 		t.Fatalf("ensure service: %v", err)
 	}

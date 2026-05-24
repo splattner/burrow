@@ -36,60 +36,44 @@ var errStreamOpenTimeout = fmt.Errorf("stream open timeout")
 type Server struct {
 	cfg     config.Config
 	log     *logrus.Logger
-	mux     *tunnel.Multiplexer
 	kube    *kube.Reconciler
 	metrics *metrics.Registry
-	hb      *tunnel.HeartbeatTracker
 	auth    *auth.Verifier
 	authErr error
 
-	connMu sync.RWMutex
-	conn   *websocket.Conn
-	send   chan []byte
-	alive  bool
-	authID auth.Identity
-
-	pendingMu    sync.Mutex
-	pendingOpens map[uint64]chan error
-
-	clientMu       sync.RWMutex
-	activeClientID string
-	activeTarget   string
+	sessionsMu sync.RWMutex
+	sessions   map[string]*session
 
 	listenMu  sync.RWMutex
 	listenURL string
-	bridgeURL string
 
-	streamSeq  atomic.Uint64
 	sessionSeq atomic.Uint64
 
-	sessionIDMu sync.RWMutex
-	sessionID   string
+	// runCtx is the context passed to Run; used for per-session background
+	// goroutines (bridge listeners, heartbeat loops) that should live for the
+	// server's lifetime.
+	runCtx context.Context //nolint:containedctx
 
-	registeredOnce sync.Once
-	registeredCh   chan struct{}
-	startedCh      chan struct{}
+	startedCh chan struct{}
 }
 
 func New(cfg config.Config, logger *logrus.Logger) *Server {
 	verifier, authErr := auth.NewVerifier(cfg)
 
 	return &Server{
-		cfg:          cfg,
-		log:          logger,
-		mux:          tunnel.NewMultiplexer(),
-		kube:         kube.NewReconcilerWithBridgeOptions(cfg.Namespace, cfg.BridgeAddr, cfg.EnableKubeAPI),
-		metrics:      metrics.New(),
-		hb:           tunnel.NewHeartbeatTracker(time.Now()),
-		auth:         verifier,
-		authErr:      authErr,
-		pendingOpens: make(map[uint64]chan error),
-		registeredCh: make(chan struct{}),
-		startedCh:    make(chan struct{}),
+		cfg:       cfg,
+		log:       logger,
+		kube:      kube.NewReconcilerWithOptions(cfg.Namespace, cfg.EnableKubeAPI),
+		metrics:   metrics.New(),
+		auth:      verifier,
+		authErr:   authErr,
+		sessions:  make(map[string]*session),
+		startedCh: make(chan struct{}),
 	}
 }
 
 func (s *Server) Run(ctx context.Context) error {
+	s.runCtx = ctx
 	s.log.Infof("server mode: listen=%s namespace=%s", s.cfg.ServerAddr, s.cfg.Namespace)
 	if err := s.kube.EnsureInfrastructure(ctx); err != nil {
 		return fmt.Errorf("kube init: %w", err)
@@ -98,6 +82,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/metrics", s.handleMetrics)
+	mux.HandleFunc("/api/clients/", s.handleClientAPI)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -112,18 +97,6 @@ func (s *Server) Run(ctx context.Context) error {
 		_ = ln.Close()
 	}()
 
-	var bridgeLn net.Listener
-	if s.cfg.BridgeAddr != "" {
-		bridgeLn, err = net.Listen("tcp", s.cfg.BridgeAddr)
-		if err != nil {
-			return fmt.Errorf("bridge listen: %w", err)
-		}
-		defer func() {
-			_ = bridgeLn.Close()
-		}()
-		s.setBridgeAddr(bridgeLn.Addr().String())
-	}
-
 	s.setListenAddr(ln.Addr().String())
 	close(s.startedCh)
 
@@ -134,11 +107,6 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 	}()
 
-	if bridgeLn != nil {
-		go s.runBridgeListener(ctx, bridgeLn)
-	}
-
-	go s.heartbeatLoop(ctx)
 	go s.staleSweepLoop(ctx)
 
 	select {
@@ -146,8 +114,7 @@ func (s *Server) Run(ctx context.Context) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		_ = httpServer.Shutdown(shutdownCtx)
-		s.closeSession()
-		s.closeAllStreamsWithMetrics()
+		s.closeAllSessions()
 		return nil
 	case serveErr := <-errCh:
 		return fmt.Errorf("http serve: %w", serveErr)
@@ -159,7 +126,6 @@ func (s *Server) WaitUntilStarted(timeout time.Duration) bool {
 		<-s.startedCh
 		return true
 	}
-
 	select {
 	case <-s.startedCh:
 		return true
@@ -168,17 +134,32 @@ func (s *Server) WaitUntilStarted(timeout time.Duration) bool {
 	}
 }
 
-func (s *Server) WaitForClient(timeout time.Duration) bool {
-	if timeout <= 0 {
-		<-s.registeredCh
-		return true
-	}
+// WaitForClient blocks until the client with the given clientID has sent a
+// successful register frame, or until timeout elapses.
+func (s *Server) WaitForClient(clientID string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		s.sessionsMu.RLock()
+		sess := s.sessions[clientID]
+		s.sessionsMu.RUnlock()
 
-	select {
-	case <-s.registeredCh:
-		return true
-	case <-time.After(timeout):
-		return false
+		if sess != nil {
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				return false
+			}
+			select {
+			case <-sess.registeredCh:
+				return true
+			case <-time.After(remaining):
+				return false
+			}
+		}
+
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -191,38 +172,24 @@ func (s *Server) WSURL() string {
 	return "ws://" + s.listenURL + "/ws"
 }
 
-func (s *Server) BridgeAddr() string {
-	s.listenMu.RLock()
-	defer s.listenMu.RUnlock()
-	return s.bridgeURL
+// BridgeAddr returns the bridge listener address for the given client.
+// Returns "" if no bridge listener has been started for that client yet.
+func (s *Server) BridgeAddr(clientID string) string {
+	s.sessionsMu.RLock()
+	sess := s.sessions[clientID]
+	s.sessionsMu.RUnlock()
+	if sess == nil {
+		return ""
+	}
+	return sess.getBridgeAddr()
 }
 
-func (s *Server) OpenStream(streamID uint64, target string) (*tunnel.Stream, error) {
-	if !s.hasActiveSession() {
+// OpenStream opens a new multiplexed stream to the given client and waits for
+// the client's open_ack before returning.
+func (s *Server) OpenStream(clientID string, streamID uint64, target string) (*tunnel.Stream, error) {
+	sess := s.lookupSession(clientID)
+	if sess == nil {
 		return nil, errNoActiveClient
-	}
-
-	stream, err := s.mux.Open(streamID)
-	if err != nil {
-		return nil, err
-	}
-
-	ackCh := s.trackPendingOpen(streamID)
-	defer s.untrackPendingOpen(streamID)
-
-	wire, err := protocol.EncodeControlFrame(streamID, protocol.ControlFrame{
-		Type:     protocol.FrameOpen,
-		StreamID: streamID,
-		Target:   target,
-	})
-	if err != nil {
-		s.mux.Close(streamID)
-		return nil, fmt.Errorf("encode open control: %w", err)
-	}
-
-	if err := s.enqueue(wire); err != nil {
-		s.mux.Close(streamID)
-		return nil, err
 	}
 
 	openTimeout := s.cfg.HeartbeatInterval
@@ -230,41 +197,38 @@ func (s *Server) OpenStream(streamID uint64, target string) (*tunnel.Stream, err
 		openTimeout = 5 * time.Second
 	}
 
-	select {
-	case ackErr := <-ackCh:
-		if ackErr != nil {
-			s.mux.Close(streamID)
-			return nil, ackErr
-		}
-		s.metrics.IncStreams()
-		return stream, nil
-	case <-time.After(openTimeout):
-		s.mux.Close(streamID)
-		return nil, errStreamOpenTimeout
-	}
-}
-
-func (s *Server) SendData(streamID uint64, payload []byte) error {
-	wire, err := protocol.EncodeDataFrame(streamID, payload)
+	stream, err := sess.openStream(streamID, target, openTimeout)
 	if err != nil {
-		return fmt.Errorf("encode data frame: %w", err)
+		return nil, err
 	}
-	return s.enqueue(wire)
+	s.metrics.IncStreams()
+	return stream, nil
 }
 
-func (s *Server) CloseStream(streamID uint64) error {
-	if closed := s.mux.Close(streamID); closed {
+// SendData sends raw bytes over an existing stream to the given client.
+func (s *Server) SendData(clientID string, streamID uint64, payload []byte) error {
+	sess := s.lookupSession(clientID)
+	if sess == nil {
+		return errNoActiveClient
+	}
+	return sess.sendData(streamID, payload)
+}
+
+// CloseStream closes a stream to the given client.
+func (s *Server) CloseStream(clientID string, streamID uint64) error {
+	sess := s.lookupSession(clientID)
+	if sess == nil {
+		return nil
+	}
+	if sess.mux.Close(streamID) {
 		s.metrics.DecStreams()
 	}
-	wire, err := protocol.EncodeControlFrame(streamID, protocol.ControlFrame{
-		Type:     protocol.FrameClose,
-		StreamID: streamID,
-	})
-	if err != nil {
-		return fmt.Errorf("encode close control: %w", err)
-	}
-	return s.enqueue(wire)
+	return sess.closeStream(streamID)
 }
+
+// ---------------------------------------------------------------------------
+// WebSocket handling
+// ---------------------------------------------------------------------------
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	authID, authErr := s.authenticateRequest(r)
@@ -280,36 +244,29 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	prevConn, prevSend, send := s.swapSession(conn, authID)
-	if prevConn != nil {
-		s.onSessionReplaced()
-		_ = prevConn.Close()
-	}
-	if prevSend != nil {
-		close(prevSend)
-	}
-
+	send := make(chan []byte, 128)
 	go s.writePump(conn, send)
-	s.readPump(conn)
-	s.closeSessionIfCurrent(conn, send)
+	s.readPump(conn, send, authID)
 }
 
-func (s *Server) readPump(conn *websocket.Conn) {
+func (s *Server) readPump(conn *websocket.Conn, send chan []byte, authID auth.Identity) {
 	defer func() {
 		_ = conn.Close()
 	}()
+
+	var activeSess *session
 
 	for {
 		_, payload, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) || err == io.EOF {
-				return
+				break
 			}
 			if strings.Contains(err.Error(), "use of closed network connection") {
-				return
+				break
 			}
 			s.log.Errorf("server read error: %v", err)
-			return
+			break
 		}
 
 		wf, err := protocol.DecodeWireFrame(payload)
@@ -318,8 +275,118 @@ func (s *Server) readPump(conn *websocket.Conn) {
 			continue
 		}
 
-		s.handleWireFrame(wf)
+		// Before registration: only process FrameRegister.
+		if activeSess == nil {
+			if wf.Kind != protocol.KindControl {
+				continue
+			}
+			cf, decErr := protocol.DecodeControlFromWire(wf)
+			if decErr != nil {
+				s.log.Errorf("server decode control failed: %v", decErr)
+				continue
+			}
+			if cf.Type != protocol.FrameRegister {
+				continue
+			}
+			activeSess = s.handleRegister(conn, send, authID, cf)
+			continue
+		}
+
+		s.handleWireFrame(activeSess, wf)
 	}
+
+	// Cleanup on connection drop.
+	if activeSess != nil {
+		if activeSess.onDisconnected(conn, send) {
+			s.metrics.DecSessions()
+			s.markClientDisconnected(activeSess.clientID)
+			close(send)
+		}
+		// If onDisconnected returned false, prevSend was already closed by
+		// swapConn during a concurrent reconnect.
+	} else {
+		// Never registered: stop the writePump.
+		close(send)
+	}
+}
+
+// handleRegister processes a FrameRegister control frame. It creates or finds
+// the session for cf.ClientID, swaps in the new conn/send, starts per-session
+// goroutines (bridge, heartbeat) on first registration, and sends register_ack.
+// Returns the session to use for subsequent frames, or nil on rejection.
+func (s *Server) handleRegister(conn *websocket.Conn, send chan []byte, authID auth.Identity, cf protocol.ControlFrame) *session {
+	if !s.registerIdentityAllowed(authID, cf.ClientID) {
+		s.log.Warnf("register rejected: client_id=%q does not match authenticated identity", cf.ClientID)
+		if wire, encErr := protocol.EncodeControlFrame(0, protocol.ControlFrame{
+			Type:    protocol.FrameError,
+			Message: "client identity mismatch",
+		}); encErr == nil {
+			_ = conn.WriteMessage(websocket.BinaryMessage, wire)
+		}
+		close(send)
+		_ = conn.Close()
+		return nil
+	}
+
+	// Look up or create the session.
+	s.sessionsMu.Lock()
+	sess, exists := s.sessions[cf.ClientID]
+	if !exists {
+		sess = newSession(cf.ClientID, authID, fmt.Sprintf("sess-%d", s.sessionSeq.Add(1)))
+		s.sessions[cf.ClientID] = sess
+	}
+	s.sessionsMu.Unlock()
+
+	newSessionID := fmt.Sprintf("sess-%d", s.sessionSeq.Add(1))
+	prevConn, prevSend := sess.swapConn(conn, send, authID, newSessionID)
+	sess.target = cf.Target
+
+	if prevConn == nil {
+		// First registration for this client.
+		s.metrics.IncSessions()
+	}
+
+	// Close the old connection to unblock the previous readPump goroutine.
+	if prevSend != nil {
+		close(prevSend)
+	}
+	if prevConn != nil {
+		_ = prevConn.Close()
+	}
+
+	sess.hb.Beat(time.Now())
+
+	// Start per-session bridge listener (once per session lifetime).
+	sess.bridgeOnce.Do(func() {
+		s.startBridgeForSession(sess)
+	})
+
+	// Reconcile the Kubernetes Service for this client.
+	bridgePort := sess.bridgePort()
+	if _, err := s.kube.EnsureClientService(context.Background(), cf.ClientID, cf.Target, bridgePort); err != nil {
+		s.log.Errorf("reconcile client service failed client=%q: %v", cf.ClientID, err)
+	}
+
+	// Signal that this client has registered (idempotent on reconnect).
+	sess.registeredOnce.Do(func() {
+		close(sess.registeredCh)
+	})
+
+	// Start heartbeat loop (once per session lifetime, runs for server lifetime).
+	if !exists {
+		go s.runHeartbeatLoop(s.runCtx, sess)
+	}
+
+	ack, err := protocol.EncodeControlFrame(0, protocol.ControlFrame{
+		Type:              protocol.FrameRegisterAck,
+		SessionID:         sess.sessionID,
+		PreviousSessionID: cf.PreviousSessionID,
+	})
+	if err == nil {
+		_ = sess.enqueue(ack)
+	}
+
+	return sess
 }
 
 func (s *Server) writePump(conn *websocket.Conn, send <-chan []byte) {
@@ -335,14 +402,17 @@ func (s *Server) writePump(conn *websocket.Conn, send <-chan []byte) {
 	}
 }
 
-func (s *Server) handleWireFrame(wf protocol.WireFrame) {
+func (s *Server) handleWireFrame(sess *session, wf protocol.WireFrame) {
 	switch wf.Kind {
 	case protocol.KindData:
-		if err := s.mux.Deliver(wf.StreamID, wf.Payload); err != nil {
+		if err := sess.mux.Deliver(wf.StreamID, wf.Payload); err != nil {
 			if errors.Is(err, tunnel.ErrStreamBackpressure) {
 				s.metrics.IncStreamBackpressureDrops()
 				s.log.Warnf("server stream=%d backpressure; closing stream", wf.StreamID)
-				_ = s.CloseStream(wf.StreamID)
+				if sess.mux.Close(wf.StreamID) {
+					s.metrics.DecStreams()
+				}
+				_ = sess.closeStream(wf.StreamID)
 				return
 			}
 			s.log.Errorf("server deliver stream=%d failed: %v", wf.StreamID, err)
@@ -353,146 +423,65 @@ func (s *Server) handleWireFrame(wf protocol.WireFrame) {
 			s.log.Errorf("server decode control failed: %v", err)
 			return
 		}
-		s.handleControl(cf)
+		s.handleControl(sess, cf)
 	}
 }
 
-func (s *Server) handleControl(cf protocol.ControlFrame) {
+func (s *Server) handleControl(sess *session, cf protocol.ControlFrame) {
 	switch cf.Type {
-	case protocol.FrameRegister:
-		if !s.registerIdentityAllowed(cf.ClientID) {
-			s.log.Warnf("register rejected: client_id=%q does not match authenticated identity", cf.ClientID)
-			_ = s.sendControlError(0, "client identity mismatch")
-			s.closeSession()
-			return
-		}
-		s.hb.Beat(time.Now())
-		s.setActiveClient(cf.ClientID, cf.Target)
-		if _, err := s.kube.EnsureClientService(context.Background(), cf.ClientID, cf.Target); err != nil {
-			s.log.Errorf("reconcile client service failed client=%q: %v", cf.ClientID, err)
-		}
-		s.registeredOnce.Do(func() {
-			close(s.registeredCh)
-		})
-		ack, err := protocol.EncodeControlFrame(0, protocol.ControlFrame{
-			Type:              protocol.FrameRegisterAck,
-			SessionID:         s.currentSessionID(),
-			PreviousSessionID: cf.PreviousSessionID,
-		})
-		if err == nil {
-			_ = s.enqueue(ack)
-		}
 	case protocol.FrameOpenAck:
-		s.resolvePendingOpen(cf.StreamID, nil)
+		sess.resolvePendingOpen(cf.StreamID, nil)
 	case protocol.FrameClose:
-		if closed := s.mux.Close(cf.StreamID); closed {
+		if sess.mux.Close(cf.StreamID) {
 			s.metrics.DecStreams()
 		}
-		s.resolvePendingOpen(cf.StreamID, fmt.Errorf("stream closed before open ack"))
+		sess.resolvePendingOpen(cf.StreamID, fmt.Errorf("stream closed before open ack"))
 	case protocol.FrameError:
-		s.resolvePendingOpen(cf.StreamID, fmt.Errorf("client error: %s", cf.Message))
+		sess.resolvePendingOpen(cf.StreamID, fmt.Errorf("client error: %s", cf.Message))
 	case protocol.FrameHeartbeat:
-		s.hb.Beat(time.Now())
+		sess.hb.Beat(time.Now())
 		ack, err := protocol.EncodeControlFrame(0, protocol.ControlFrame{Type: protocol.FrameHeartbeatAck})
 		if err == nil {
-			_ = s.enqueue(ack)
+			_ = sess.enqueue(ack)
 		}
 	case protocol.FrameHeartbeatAck:
-		s.hb.Beat(time.Now())
+		sess.hb.Beat(time.Now())
+	case protocol.FrameRegister:
+		// Re-register on an active session is a no-op.
 	default:
 	}
 }
 
-func (s *Server) enqueue(payload []byte) error {
-	s.connMu.RLock()
-	send := s.send
-	if send == nil {
-		s.connMu.RUnlock()
-		return errNoActiveClient
-	}
-	if !s.alive {
-		s.connMu.RUnlock()
-		return errNoActiveClient
-	}
+// ---------------------------------------------------------------------------
+// Bridge listener
+// ---------------------------------------------------------------------------
 
-	ok, full := trySend(send, payload)
-	s.connMu.RUnlock()
-	if !ok {
-		return errNoActiveClient
-	}
-	if full {
-		return fmt.Errorf("server send queue full")
-	}
-	return nil
-}
-
-func (s *Server) swapSession(conn *websocket.Conn, authID auth.Identity) (*websocket.Conn, chan []byte, chan []byte) {
-	s.connMu.Lock()
-	defer s.connMu.Unlock()
-
-	prevConn := s.conn
-	prevSend := s.send
-
-	s.conn = conn
-	s.send = make(chan []byte, 128)
-	s.alive = true
-	s.authID = authID
-	s.setCurrentSessionID(fmt.Sprintf("sess-%d", s.sessionSeq.Add(1)))
-	if prevConn == nil {
-		s.metrics.IncSessions()
-	}
-	s.hb.Beat(time.Now())
-	return prevConn, prevSend, s.send
-}
-
-func (s *Server) closeSession() {
-	s.connMu.Lock()
-	conn := s.conn
-	send := s.send
-	hadActive := conn != nil
-	s.conn = nil
-	s.send = nil
-	s.alive = false
-	s.authID = auth.Identity{}
-	s.setCurrentSessionID("")
-	s.connMu.Unlock()
-	s.onSessionDropped(fmt.Errorf("session closed"))
-	if hadActive {
-		s.metrics.DecSessions()
-	}
-
-	if send != nil {
-		close(send)
-	}
-	if conn != nil {
-		_ = conn.Close()
-	}
-}
-
-func (s *Server) closeSessionIfCurrent(conn *websocket.Conn, send chan []byte) {
-	s.connMu.Lock()
-	if s.conn != conn || s.send != send {
-		s.connMu.Unlock()
+func (s *Server) startBridgeForSession(sess *session) {
+	bindAddr := bridgeBindAddr(s.cfg.BridgeHost)
+	if bindAddr == "" {
 		return
 	}
-	s.conn = nil
-	s.send = nil
-	s.alive = false
-	s.authID = auth.Identity{}
-	s.setCurrentSessionID("")
-	s.connMu.Unlock()
-	s.onSessionDropped(fmt.Errorf("session closed"))
-	s.metrics.DecSessions()
 
-	if send != nil {
-		close(send)
+	ln, err := net.Listen("tcp", bindAddr)
+	if err != nil {
+		s.log.Errorf("bridge listener start failed for client %q: %v", sess.clientID, err)
+		return
 	}
-	if conn != nil {
-		_ = conn.Close()
-	}
+
+	sess.bridgeMu.Lock()
+	sess.bridgeLn = ln
+	sess.bridgeAddr = ln.Addr().String()
+	sess.bridgeMu.Unlock()
+
+	go s.runBridgeListenerForSession(s.runCtx, ln, sess)
 }
 
-func (s *Server) runBridgeListener(ctx context.Context, ln net.Listener) {
+func (s *Server) runBridgeListenerForSession(ctx context.Context, ln net.Listener, sess *session) {
+	go func() {
+		<-ctx.Done()
+		_ = ln.Close()
+	}()
+
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -506,25 +495,32 @@ func (s *Server) runBridgeListener(ctx context.Context, ln net.Listener) {
 				time.Sleep(50 * time.Millisecond)
 				continue
 			}
-			s.log.Errorf("bridge accept error: %v", err)
+			s.log.Errorf("bridge accept error client=%q: %v", sess.clientID, err)
 			return
 		}
 
-		go s.handleBridgeConn(conn)
+		go s.handleBridgeConn(sess, conn)
 	}
 }
 
-func (s *Server) handleBridgeConn(conn net.Conn) {
+func (s *Server) handleBridgeConn(sess *session, conn net.Conn) {
 	defer func() {
 		_ = conn.Close()
 	}()
 
-	streamID := s.streamSeq.Add(1)
-	stream, err := s.OpenStream(streamID, s.activeClientTarget())
+	streamID := sess.streamSeq.Add(1)
+
+	openTimeout := s.cfg.HeartbeatInterval
+	if openTimeout <= 0 {
+		openTimeout = 5 * time.Second
+	}
+
+	stream, err := sess.openStream(streamID, sess.target, openTimeout)
 	if err != nil {
-		s.log.Errorf("bridge open stream=%d failed: %v", streamID, err)
+		s.log.Errorf("bridge open stream=%d client=%q failed: %v", streamID, sess.clientID, err)
 		return
 	}
+	s.metrics.IncStreams()
 
 	tunnelToPodDone := make(chan struct{})
 	go func() {
@@ -542,7 +538,7 @@ func (s *Server) handleBridgeConn(conn net.Conn) {
 		if n > 0 {
 			payload := make([]byte, n)
 			copy(payload, buf[:n])
-			if sendErr := s.SendData(streamID, payload); sendErr != nil {
+			if sendErr := sess.sendData(streamID, payload); sendErr != nil {
 				s.log.Errorf("bridge send stream=%d failed: %v", streamID, sendErr)
 				break
 			}
@@ -555,7 +551,10 @@ func (s *Server) handleBridgeConn(conn net.Conn) {
 		}
 	}
 
-	_ = s.CloseStream(streamID)
+	if sess.mux.Close(streamID) {
+		s.metrics.DecStreams()
+	}
+	_ = sess.closeStream(streamID)
 	_ = conn.SetDeadline(time.Now().Add(100 * time.Millisecond))
 	select {
 	case <-tunnelToPodDone:
@@ -563,40 +562,11 @@ func (s *Server) handleBridgeConn(conn net.Conn) {
 	}
 }
 
-func (s *Server) hasActiveSession() bool {
-	s.connMu.RLock()
-	defer s.connMu.RUnlock()
-	return s.send != nil && s.alive
-}
+// ---------------------------------------------------------------------------
+// Heartbeat
+// ---------------------------------------------------------------------------
 
-func (s *Server) trackPendingOpen(streamID uint64) chan error {
-	ch := make(chan error, 1)
-	s.pendingMu.Lock()
-	s.pendingOpens[streamID] = ch
-	s.pendingMu.Unlock()
-	return ch
-}
-
-func (s *Server) untrackPendingOpen(streamID uint64) {
-	s.pendingMu.Lock()
-	delete(s.pendingOpens, streamID)
-	s.pendingMu.Unlock()
-}
-
-func (s *Server) resolvePendingOpen(streamID uint64, err error) {
-	s.pendingMu.Lock()
-	ch, ok := s.pendingOpens[streamID]
-	s.pendingMu.Unlock()
-	if !ok {
-		return
-	}
-	select {
-	case ch <- err:
-	default:
-	}
-}
-
-func (s *Server) heartbeatLoop(ctx context.Context) {
+func (s *Server) runHeartbeatLoop(ctx context.Context, sess *session) {
 	interval := s.cfg.HeartbeatInterval
 	if interval <= 0 {
 		interval = 10 * time.Second
@@ -614,13 +584,18 @@ func (s *Server) heartbeatLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if !s.hasActiveSession() {
+			if !sess.hasActive() {
 				continue
 			}
 
-			if s.hb.TimedOut(time.Now(), timeout) {
-				s.log.Warn("server session heartbeat timed out; closing active websocket")
-				s.closeSession()
+			if sess.hb.TimedOut(time.Now(), timeout) {
+				s.log.Warnf("session client=%q heartbeat timed out; closing connection", sess.clientID)
+				sess.mu.RLock()
+				conn := sess.conn
+				sess.mu.RUnlock()
+				if conn != nil {
+					_ = conn.Close()
+				}
 				continue
 			}
 
@@ -628,55 +603,14 @@ func (s *Server) heartbeatLoop(ctx context.Context) {
 			if err != nil {
 				continue
 			}
-			_ = s.enqueue(frame)
+			_ = sess.enqueue(frame)
 		}
 	}
 }
 
-func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	_, _ = fmt.Fprintf(w,
-		"# HELP burrow_sessions_active Number of active websocket client sessions.\n"+
-			"# TYPE burrow_sessions_active gauge\n"+
-			"burrow_sessions_active %d\n"+
-			"# HELP burrow_streams_active Number of active multiplexed streams.\n"+
-			"# TYPE burrow_streams_active gauge\n"+
-			"burrow_streams_active %d\n"+
-			"# HELP burrow_stale_services_deleted_total Total stale client services deleted by sweeps.\n"+
-			"# TYPE burrow_stale_services_deleted_total counter\n"+
-			"burrow_stale_services_deleted_total %d\n"+
-			"# HELP burrow_stream_backpressure_drops_total Total stream drops caused by backpressure saturation.\n"+
-			"# TYPE burrow_stream_backpressure_drops_total counter\n"+
-			"burrow_stream_backpressure_drops_total %d\n",
-		s.metrics.Sessions(),
-		s.metrics.Streams(),
-		s.metrics.StaleServicesDeleted(),
-		s.metrics.StreamBackpressureDrops(),
-	)
-}
-
-func (s *Server) closeAllStreamsWithMetrics() {
-	active := s.mux.Count()
-	if active <= 0 {
-		return
-	}
-	s.mux.CloseAll()
-	for i := 0; i < active; i++ {
-		s.metrics.DecStreams()
-	}
-}
-
-func (s *Server) onSessionDropped(err error) {
-	s.closeAllStreamsWithMetrics()
-	s.failPendingOpens(err)
-	s.markActiveClientDisconnected()
-}
-
-func (s *Server) onSessionReplaced() {
-	s.closeAllStreamsWithMetrics()
-	s.failPendingOpens(fmt.Errorf("session replaced"))
-	s.markActiveClientDisconnected()
-}
+// ---------------------------------------------------------------------------
+// Stale sweep
+// ---------------------------------------------------------------------------
 
 func (s *Server) staleSweepLoop(ctx context.Context) {
 	interval := s.cfg.SweepInterval
@@ -705,83 +639,79 @@ func (s *Server) staleSweepLoop(ctx context.Context) {
 	}
 }
 
-func (s *Server) failPendingOpens(err error) {
-	s.pendingMu.Lock()
-	defer s.pendingMu.Unlock()
-	for _, ch := range s.pendingOpens {
-		select {
-		case ch <- err:
-		default:
-		}
-	}
+// ---------------------------------------------------------------------------
+// Metrics
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	_, _ = fmt.Fprintf(w,
+		"# HELP burrow_sessions_active Number of active websocket client sessions.\n"+
+			"# TYPE burrow_sessions_active gauge\n"+
+			"burrow_sessions_active %d\n"+
+			"# HELP burrow_streams_active Number of active multiplexed streams.\n"+
+			"# TYPE burrow_streams_active gauge\n"+
+			"burrow_streams_active %d\n"+
+			"# HELP burrow_stale_services_deleted_total Total stale client services deleted by sweeps.\n"+
+			"# TYPE burrow_stale_services_deleted_total counter\n"+
+			"burrow_stale_services_deleted_total %d\n"+
+			"# HELP burrow_stream_backpressure_drops_total Total stream drops caused by backpressure saturation.\n"+
+			"# TYPE burrow_stream_backpressure_drops_total counter\n"+
+			"burrow_stream_backpressure_drops_total %d\n",
+		s.metrics.Sessions(),
+		s.metrics.Streams(),
+		s.metrics.StaleServicesDeleted(),
+		s.metrics.StreamBackpressureDrops(),
+	)
 }
 
-func trySend(ch chan []byte, payload []byte) (ok bool, full bool) {
-	defer func() {
-		if recover() != nil {
-			ok = false
-			full = false
-		}
-	}()
-
-	select {
-	case ch <- payload:
-		return true, false
-	default:
-		return true, true
+// handleClientAPI serves /api/clients/{clientID}/bridge-addr.
+// Returns the bridge listener address for a connected client as plain text,
+// or 404 if the client is not connected or has no bridge listener yet.
+func (s *Server) handleClientAPI(w http.ResponseWriter, r *http.Request) {
+	// Expect path: /api/clients/{clientID}/bridge-addr
+	path := strings.TrimPrefix(r.URL.Path, "/api/clients/")
+	clientID, suffix, ok := strings.Cut(path, "/")
+	if !ok || suffix != "bridge-addr" || clientID == "" {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
 	}
+
+	s.sessionsMu.RLock()
+	sess := s.sessions[clientID]
+	s.sessionsMu.RUnlock()
+
+	if sess == nil {
+		http.Error(w, "client not found", http.StatusNotFound)
+		return
+	}
+	addr := sess.getBridgeAddr()
+	if addr == "" {
+		http.Error(w, "no bridge listener", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = fmt.Fprint(w, addr)
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+func (s *Server) lookupSession(clientID string) *session {
+	s.sessionsMu.RLock()
+	sess := s.sessions[clientID]
+	s.sessionsMu.RUnlock()
+	if sess == nil || !sess.hasActive() {
+		return nil
+	}
+	return sess
 }
 
 func (s *Server) setListenAddr(addr string) {
 	s.listenMu.Lock()
 	defer s.listenMu.Unlock()
 	s.listenURL = addr
-}
-
-func (s *Server) setBridgeAddr(addr string) {
-	s.listenMu.Lock()
-	defer s.listenMu.Unlock()
-	s.bridgeURL = addr
-}
-
-func (s *Server) currentSessionID() string {
-	s.sessionIDMu.RLock()
-	defer s.sessionIDMu.RUnlock()
-	return s.sessionID
-}
-
-func (s *Server) setCurrentSessionID(id string) {
-	s.sessionIDMu.Lock()
-	defer s.sessionIDMu.Unlock()
-	s.sessionID = id
-}
-
-func (s *Server) setActiveClient(clientID, target string) {
-	s.clientMu.Lock()
-	defer s.clientMu.Unlock()
-	s.activeClientID = clientID
-	s.activeTarget = target
-}
-
-func (s *Server) activeClientTarget() string {
-	s.clientMu.RLock()
-	defer s.clientMu.RUnlock()
-	return s.activeTarget
-}
-
-func (s *Server) markActiveClientDisconnected() {
-	s.clientMu.Lock()
-	clientID := s.activeClientID
-	s.activeClientID = ""
-	s.activeTarget = ""
-	s.clientMu.Unlock()
-
-	if clientID == "" {
-		return
-	}
-	if err := s.kube.MarkClientDisconnected(context.Background(), clientID); err != nil {
-		s.log.Errorf("mark client disconnected failed client=%q: %v", clientID, err)
-	}
 }
 
 func (s *Server) authenticateRequest(r *http.Request) (auth.Identity, error) {
@@ -800,11 +730,7 @@ func (s *Server) authenticateRequest(r *http.Request) (auth.Identity, error) {
 	return authID, nil
 }
 
-func (s *Server) registerIdentityAllowed(clientID string) bool {
-	s.connMu.RLock()
-	authID := s.authID
-	s.connMu.RUnlock()
-
+func (s *Server) registerIdentityAllowed(authID auth.Identity, clientID string) bool {
 	if authID.Method != "jwt" {
 		return true
 	}
@@ -814,14 +740,57 @@ func (s *Server) registerIdentityAllowed(clientID string) bool {
 	return authID.Subject == clientID
 }
 
-func (s *Server) sendControlError(streamID uint64, message string) error {
-	frame, err := protocol.EncodeControlFrame(streamID, protocol.ControlFrame{
-		Type:     protocol.FrameError,
-		StreamID: streamID,
-		Message:  message,
-	})
-	if err != nil {
-		return err
+func (s *Server) markClientDisconnected(clientID string) {
+	if clientID == "" {
+		return
 	}
-	return s.enqueue(frame)
+	if err := s.kube.MarkClientDisconnected(context.Background(), clientID); err != nil {
+		s.log.Errorf("mark client disconnected failed client=%q: %v", clientID, err)
+	}
+}
+
+func (s *Server) closeAllSessions() {
+	s.sessionsMu.RLock()
+	sessions := make([]*session, 0, len(s.sessions))
+	for _, sess := range s.sessions {
+		sessions = append(sessions, sess)
+	}
+	s.sessionsMu.RUnlock()
+
+	for _, sess := range sessions {
+		sess.forceClose()
+	}
+}
+
+// bridgeBindAddr returns host:0 from the configured bridge host so each
+// per-client listener gets a unique random port. Returns "" if disabled.
+func bridgeBindAddr(cfgBridgeHost string) string {
+	h := strings.TrimSpace(cfgBridgeHost)
+	if h == "" {
+		return ""
+	}
+	// Accept both "host" and "host:port" (legacy) — always bind on port 0.
+	if strings.Contains(h, ":") {
+		host, _, err := net.SplitHostPort(h)
+		if err == nil {
+			return host + ":0"
+		}
+	}
+	return h + ":0"
+}
+
+func trySend(ch chan []byte, payload []byte) (ok bool, full bool) {
+	defer func() {
+		if recover() != nil {
+			ok = false
+			full = false
+		}
+	}()
+
+	select {
+	case ch <- payload:
+		return true, false
+	default:
+		return true, true
+	}
 }

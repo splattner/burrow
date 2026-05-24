@@ -15,14 +15,17 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "server",
 		Short: "Run the reverse tunnel server",
-		Example: `  # Local dev with HS256 JWT verification
-  burrow server --jwt-hmac-secret dev-secret --server-addr :8080 --bridge-addr :1111
+		Example: `  # Local dev with HS256 JWT verification (bridge binds on all interfaces, random ports per client)
+  burrow server --jwt-hmac-secret dev-secret --server-addr :8080 --bridge-host 0.0.0.0
+
+  # Restrict bridge listeners to loopback only
+  burrow server --jwt-hmac-secret dev-secret --server-addr :8080 --bridge-host 127.0.0.1
 
   # In-cluster style with explicit kube API mode
   burrow server --jwks-url https://issuer.example/.well-known/jwks.json --enable-kube-api true
 
   # Equivalent with environment variables
-  BURROW_JWT_HMAC_SECRET=dev-secret BURROW_SERVER_ADDR=:8080 BURROW_BRIDGE_ADDR=:1111 burrow server`,
+  BURROW_JWT_HMAC_SECRET=dev-secret BURROW_SERVER_ADDR=:8080 BURROW_BRIDGE_HOST=0.0.0.0 burrow server`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg, err := config.LoadFromViper(v)
 			if err != nil {
@@ -48,7 +51,7 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 	flags.String("jwt-issuer", "", "Expected JWT issuer")
 	flags.String("jwt-audience", "", "Expected JWT audience")
 	flags.String("server-addr", ":8080", "Server listen address")
-	flags.String("bridge-addr", "", "TCP bridge listen address for pod-side traffic")
+	flags.String("bridge-host", "", "Host to bind per-client bridge listeners on (e.g. 0.0.0.0 or 127.0.0.1). Each client gets a random port. Empty disables bridging.")
 	flags.String("enable-kube-api", "", "Enable Kubernetes Service API reconciliation (true|false, empty=auto)")
 	flags.String("namespace", "default", "Namespace for service reconciliation")
 	flags.String("sweep-interval", "1m", "Periodic stale-service sweep interval")
@@ -65,7 +68,7 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 		"jwt-issuer",
 		"jwt-audience",
 		"server-addr",
-		"bridge-addr",
+		"bridge-host",
 		"enable-kube-api",
 		"namespace",
 		"sweep-interval",

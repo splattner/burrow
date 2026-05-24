@@ -11,18 +11,18 @@ import (
 func testCfg() *Config {
 	return &Config{
 		ClientID:    "test-client",
+		ServerName:  "test-client",
 		LocalTarget: "127.0.0.1:5432",
 		Namespace:   "test-ns",
 		Image:       "ghcr.io/splattner/burrow:test",
 		ServerPort:  8080,
-		BridgePort:  1111,
 	}
 }
 
 // ---- ResourceName / AuthSecretName -----------------------------------------
 
 func TestResourceNames(t *testing.T) {
-	cfg := &Config{ClientID: "my-client"}
+	cfg := &Config{ServerName: "my-client"}
 	assert.Equal(t, "burrow-my-client", cfg.ResourceName())
 	assert.Equal(t, "burrow-my-client-auth", cfg.AuthSecretName())
 }
@@ -64,7 +64,7 @@ func TestBuildDeployment_EnvVars(t *testing.T) {
 	assert.Equal(t, jwtAudience, envMap["BURROW_JWT_AUDIENCE"])
 	assert.Equal(t, jwtIssuer, envMap["BURROW_JWT_ISSUER"])
 	assert.Equal(t, ":8080", envMap["BURROW_SERVER_ADDR"])
-	assert.Equal(t, ":1111", envMap["BURROW_BRIDGE_ADDR"])
+	assert.Equal(t, "0.0.0.0", envMap["BURROW_BRIDGE_HOST"])
 	assert.Equal(t, "true", envMap["BURROW_ENABLE_KUBE_API"])
 }
 
@@ -232,5 +232,5 @@ func TestCommonLabels(t *testing.T) {
 	labels := cfg.commonLabels()
 	assert.Equal(t, cfg.ResourceName(), labels["app.kubernetes.io/name"])
 	assert.Equal(t, managedByLabel, labels["app.kubernetes.io/managed-by"])
-	assert.Equal(t, cfg.ClientID, labels["burrow.dev/client-id"])
+	assert.Equal(t, cfg.ServerName, labels["burrow.dev/server-name"])
 }

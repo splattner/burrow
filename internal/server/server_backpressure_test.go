@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/splattner/burrow/internal/auth"
 	"github.com/splattner/burrow/internal/config"
 	"github.com/splattner/burrow/internal/logging"
 	"github.com/splattner/burrow/internal/protocol"
@@ -12,22 +13,27 @@ import (
 
 func TestHandleWireFrameBackpressureClosesStreamAndCountsDrop(t *testing.T) {
 	s := New(config.Config{Namespace: "default"}, logging.NoOp())
-	s.mux = tunnel.NewMultiplexerWithConfig(tunnel.MultiplexerConfig{
+
+	sess := newSession("test-client", auth.Identity{}, "sess-test")
+	sess.mux = tunnel.NewMultiplexerWithConfig(tunnel.MultiplexerConfig{
 		StreamBufferSize: 1,
 		DeliveryTimeout:  20 * time.Millisecond,
 	})
+	s.sessionsMu.Lock()
+	s.sessions["test-client"] = sess
+	s.sessionsMu.Unlock()
 
-	stream, err := s.mux.Open(77)
+	stream, err := sess.mux.Open(77)
 	if err != nil {
 		t.Fatalf("open stream: %v", err)
 	}
-	if err := s.mux.Deliver(77, []byte("first")); err != nil {
+	if err := sess.mux.Deliver(77, []byte("first")); err != nil {
 		t.Fatalf("prime stream queue: %v", err)
 	}
 
 	s.metrics.IncStreams()
 
-	s.handleWireFrame(protocol.WireFrame{
+	s.handleWireFrame(sess, protocol.WireFrame{
 		Kind:     protocol.KindData,
 		StreamID: 77,
 		Payload:  []byte("second"),

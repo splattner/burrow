@@ -32,8 +32,8 @@ spec:
               value: "dev-local"
             - name: BURROW_SERVER_ADDR
               value: ":8080"
-            - name: BURROW_BRIDGE_ADDR
-              value: ":1111"
+            - name: BURROW_BRIDGE_HOST
+              value: "0.0.0.0"
             - name: BURROW_NAMESPACE
               valueFrom:
                 fieldRef:

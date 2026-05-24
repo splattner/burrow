@@ -36,7 +36,7 @@ func (d *deployer) checkCollision(ctx context.Context) error {
 		)
 	}
 	return fmt.Errorf(
-		"deployment %q already exists in namespace %q and is not managed by burrow; delete it manually or choose a different --client-id",
+		"deployment %q already exists in namespace %q and is not managed by burrow; delete it manually or choose a different --server-name",
 		d.cfg.ResourceName(), d.cfg.Namespace,
 	)
 }
@@ -155,13 +155,16 @@ func (d *deployer) Delete(ctx context.Context) error {
 	}
 
 	// Also remove any client Services the server's reconciler created at runtime.
-	svcs, err := d.kc.CoreV1().Services(ns).List(ctx, metav1.ListOptions{
-		LabelSelector: "app.kubernetes.io/managed-by=" + managedByLabel + ",burrow.dev/client-id=" + d.cfg.ClientID,
-	})
-	if err == nil {
-		for _, svc := range svcs.Items {
-			if err := d.kc.CoreV1().Services(ns).Delete(ctx, svc.Name, del); !ignore(err) {
-				errs = append(errs, fmt.Errorf("deleting client Service %q: %w", svc.Name, err))
+	// This is skipped if ClientID is unknown (e.g. delete by --server-name only).
+	if d.cfg.ClientID != "" {
+		svcs, err := d.kc.CoreV1().Services(ns).List(ctx, metav1.ListOptions{
+			LabelSelector: "app.kubernetes.io/managed-by=" + managedByLabel + ",burrow.dev/client-id=" + d.cfg.ClientID,
+		})
+		if err == nil {
+			for _, svc := range svcs.Items {
+				if err := d.kc.CoreV1().Services(ns).Delete(ctx, svc.Name, del); !ignore(err) {
+					errs = append(errs, fmt.Errorf("deleting client Service %q: %w", svc.Name, err))
+				}
 			}
 		}
 	}

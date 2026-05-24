@@ -8,20 +8,7 @@ Expose a TCP service running outside your cluster to workloads running inside it
 
 The client runs wherever your service lives (laptop, edge node, private server). It dials outbound to a WebSocket endpoint on the server, which runs inside your cluster. Traffic from pods reaches your local service through that persistent tunnel connection. Because the client always initiates the connection, it works through NAT, firewalls, and most corporate networks.
 
-```
-  ┌─────────────────────────────────────┐
-  │           Kubernetes cluster         │
-  │                                      │
-  │  Pod ──► Service ──► burrow-server     │
-  │                           │          │
-  └───────────────────────────┼──────────┘
-                    WebSocket │ (outbound)
-                              │
-                         burrow-client
-                              │
-                         Your service
-                       (e.g. :5432)
-```
+![Burrow architecture overview](overview.png)
 
 The server optionally manages Kubernetes `Service` objects automatically — one per connected client — so pods can reach tunnelled services by a stable DNS name.
 

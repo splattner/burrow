@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/splattner/burrow/compare/v0.3.0...v0.4.0) (2026-05-24)
+
+
+### Features
+
+* multi-tenant server with per-client sessions and --server-name expose option ([#46](https://github.com/splattner/burrow/issues/46)) ([6952a0d](https://github.com/splattner/burrow/commit/6952a0d7f897118ca08bcd2c210a16324682ad82))
+
 ## [0.3.0](https://github.com/splattner/burrow/compare/v0.2.5...v0.3.0) (2026-05-23)
 
 

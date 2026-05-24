@@ -64,7 +64,7 @@ func TestBuildDeployment_EnvVars(t *testing.T) {
 	assert.Equal(t, jwtAudience, envMap["BURROW_JWT_AUDIENCE"])
 	assert.Equal(t, jwtIssuer, envMap["BURROW_JWT_ISSUER"])
 	assert.Equal(t, ":8080", envMap["BURROW_SERVER_ADDR"])
-	assert.Equal(t, ":", envMap["BURROW_BRIDGE_ADDR"])
+	assert.Equal(t, "0.0.0.0", envMap["BURROW_BRIDGE_HOST"])
 	assert.Equal(t, "true", envMap["BURROW_ENABLE_KUBE_API"])
 }
 

@@ -280,7 +280,7 @@ All flags can be set via environment variables with the `BURROW_` prefix. Flags 
 | `--jwt-issuer` | `BURROW_JWT_ISSUER` | — | Expected `iss` claim (optional) |
 | `--jwt-audience` | `BURROW_JWT_AUDIENCE` | — | Expected `aud` claim (optional) |
 | `--server-addr` | `BURROW_SERVER_ADDR` | `:8080` | WebSocket and HTTP listen address |
-| `--bridge-addr` | `BURROW_BRIDGE_ADDR` | — | TCP bridge listen address for pod traffic |
+| `--bridge-host` | `BURROW_BRIDGE_HOST` | — | Host to bind per-client bridge listeners on (each client gets a random port) |
 | `--namespace` | `BURROW_NAMESPACE` | `default` | Namespace for auto-created client Services |
 | `--enable-kube-api` | `BURROW_ENABLE_KUBE_API` | auto | Force Kubernetes Service reconciliation on (`true`) or off (`false`) |
 | `--heartbeat-interval` | `BURROW_HEARTBEAT_INTERVAL` | `10s` | How often to send heartbeats |

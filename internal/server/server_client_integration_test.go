@@ -135,7 +135,7 @@ func TestServerBridgeListenerRelaysToClient(t *testing.T) {
 		JWTHMACSecret: "jwt-secret",
 		JWTAudience:   "burrow-server",
 		ServerAddr:    "127.0.0.1:0",
-		BridgeAddr:    "127.0.0.1:0",
+		BridgeHost:    "127.0.0.1:0",
 		Namespace:     "default",
 	}, logging.NoOp())
 

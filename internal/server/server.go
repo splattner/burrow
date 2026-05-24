@@ -457,7 +457,7 @@ func (s *Server) handleControl(sess *session, cf protocol.ControlFrame) {
 // ---------------------------------------------------------------------------
 
 func (s *Server) startBridgeForSession(sess *session) {
-	bindAddr := bridgeBindAddr(s.cfg.BridgeAddr)
+	bindAddr := bridgeBindAddr(s.cfg.BridgeHost)
 	if bindAddr == "" {
 		return
 	}
@@ -762,19 +762,21 @@ func (s *Server) closeAllSessions() {
 	}
 }
 
-// bridgeBindAddr extracts the host from cfgBridgeAddr and returns host:0 so
-// each per-client listener gets a unique random port. Returns "" if disabled.
-func bridgeBindAddr(cfgBridgeAddr string) string {
-	if strings.TrimSpace(cfgBridgeAddr) == "" {
+// bridgeBindAddr returns host:0 from the configured bridge host so each
+// per-client listener gets a unique random port. Returns "" if disabled.
+func bridgeBindAddr(cfgBridgeHost string) string {
+	h := strings.TrimSpace(cfgBridgeHost)
+	if h == "" {
 		return ""
 	}
-	if strings.Contains(cfgBridgeAddr, ":") {
-		host, _, err := net.SplitHostPort(cfgBridgeAddr)
+	// Accept both "host" and "host:port" (legacy) — always bind on port 0.
+	if strings.Contains(h, ":") {
+		host, _, err := net.SplitHostPort(h)
 		if err == nil {
 			return host + ":0"
 		}
 	}
-	return strings.TrimSpace(cfgBridgeAddr) + ":0"
+	return h + ":0"
 }
 
 func trySend(ch chan []byte, payload []byte) (ok bool, full bool) {

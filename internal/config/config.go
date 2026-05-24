@@ -23,7 +23,7 @@ type Config struct {
 	JWKSURL            string
 	JWKSRefresh        time.Duration
 	ServerAddr         string
-	BridgeAddr         string
+	BridgeHost         string
 	ServerURL          string
 	ClientID           string
 	LocalTarget        string
@@ -105,7 +105,7 @@ func LoadFromViper(v *viper.Viper) (Config, error) {
 		JWKSURL:            strings.TrimSpace(v.GetString("jwks-url")),
 		JWKSRefresh:        jwksRefresh,
 		ServerAddr:         fallbackString(v.GetString("server-addr"), ":8080"),
-		BridgeAddr:         strings.TrimSpace(v.GetString("bridge-addr")),
+		BridgeHost:         strings.TrimSpace(v.GetString("bridge-host")),
 		ServerURL:          strings.TrimSpace(v.GetString("server-url")),
 		ClientID:           strings.TrimSpace(v.GetString("client-id")),
 		LocalTarget:        strings.TrimSpace(v.GetString("local-target")),

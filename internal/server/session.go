@@ -257,18 +257,6 @@ func (sess *session) forceClose() {
 	}
 }
 
-func (sess *session) sendControlError(streamID uint64, message string) error {
-	frame, err := protocol.EncodeControlFrame(streamID, protocol.ControlFrame{
-		Type:     protocol.FrameError,
-		StreamID: streamID,
-		Message:  message,
-	})
-	if err != nil {
-		return err
-	}
-	return sess.enqueue(frame)
-}
-
 func (sess *session) getBridgeAddr() string {
 	sess.bridgeMu.RLock()
 	defer sess.bridgeMu.RUnlock()

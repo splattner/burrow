@@ -120,9 +120,9 @@ func (c *Config) buildDeployment() (*appsv1.Deployment, error) {
 								{Name: "BURROW_JWT_AUDIENCE", Value: jwtAudience},
 								{Name: "BURROW_JWT_ISSUER", Value: jwtIssuer},
 								{Name: "BURROW_SERVER_ADDR", Value: ":" + strconv.Itoa(c.ServerPort)},
-						// BURROW_BRIDGE_ADDR uses host-only (no port); the server
-						// allocates a random port per connected client.
-						{Name: "BURROW_BRIDGE_ADDR", Value: ":"},
+								// BURROW_BRIDGE_ADDR uses host-only (no port); the server
+								// allocates a random port per connected client.
+								{Name: "BURROW_BRIDGE_ADDR", Value: ":"},
 								{
 									Name: "BURROW_NAMESPACE",
 									ValueFrom: &corev1.EnvVarSource{
@@ -133,7 +133,6 @@ func (c *Config) buildDeployment() (*appsv1.Deployment, error) {
 							},
 							Ports: []corev1.ContainerPort{
 								{Name: "http", ContainerPort: serverPort, Protocol: corev1.ProtocolTCP},
-
 							},
 							ReadinessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{

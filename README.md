@@ -29,9 +29,9 @@ The server optionally manages Kubernetes `Service` objects automatically — one
 
 ## How it works
 
-1. The **server** runs in-cluster and listens on two ports:
+1. The **server** runs in-cluster and listens on:
    - An HTTP/WebSocket port (default `:8080`) — clients connect here, pods call `/healthz` and `/metrics` here.
-   - A TCP bridge port (default `:1111`) — pods that want to reach the tunnelled service connect here.
+   - One TCP bridge port per connected client (random ephemeral port) — pods that want to reach the tunnelled service connect here.
 
 2. The **client** runs outside the cluster. On startup it:
    - Dials the server's WebSocket endpoint with a signed JWT as its bearer token.
@@ -65,13 +65,14 @@ make run-client-jwt-dev \
   JWT_ISSUER=dev-local
 ```
 
-The client connects to `ws://127.0.0.1:8080/ws` by default. Traffic arriving at the server's bridge port (`:1111`) is forwarded to `127.0.0.1:5432` on the client machine.
+The client connects to `ws://127.0.0.1:8080/ws` by default. Once registered, the server assigns a random bridge port. Traffic arriving at that port is forwarded to `127.0.0.1:5432` on the client machine.
 
 **3. Test the tunnel:**
 
 ```bash
-# Anything connecting to the bridge port reaches your local service
-nc 127.0.0.1 1111
+# Discover the bridge address assigned to your client, then connect
+BRIDGE=$(curl -s http://127.0.0.1:8080/api/clients/client-a/bridge-addr)
+nc $(echo $BRIDGE | cut -d: -f1) $(echo $BRIDGE | cut -d: -f2)
 ```
 
 ---
@@ -223,7 +224,7 @@ burrow expose delete --client-id api
 | `Service burrow-<id>` | ClusterIP (Ingress mode) or LoadBalancer |
 | `Ingress burrow-<id>` | Routes external HTTPS traffic to the server (Ingress mode only) |
 
-All resources share the labels `app.kubernetes.io/managed-by=burrow` and `burrow.dev/client-id=<id>`.
+All resources share the labels `app.kubernetes.io/managed-by=burrow` and `burrow.dev/server-name=<name>` (where `<name>` is `--server-name` if provided, otherwise `--client-id`).
 
 ### Customising with `--patch-*`
 
@@ -251,7 +252,7 @@ burrow expose --client-id api --local-target 127.0.0.1:8080 \
 | `--ingress-annotation` | — | Extra Ingress annotation in `key=value` format (repeatable) |
 | `--image` | `ghcr.io/splattner/burrow:<version>` | Container image for the server |
 | `--server-port` | `8080` | Port the server listens on inside the container |
-| `--bridge-port` | `1111` | Port the bridge listener uses inside the container |
+| `--server-name` | `--client-id` | Kubernetes resource name prefix (e.g. `burrow-<server-name>`). Override to distinguish multiple deployments from the same `--client-id`. |
 | `--namespace` | context default | Kubernetes namespace |
 | `--kube-context` | current context | Kubernetes context |
 | `--reuse` | false | Connect to an existing burrow deployment instead of creating one |
@@ -280,7 +281,7 @@ All flags can be set via environment variables with the `BURROW_` prefix. Flags 
 | `--jwt-issuer` | `BURROW_JWT_ISSUER` | — | Expected `iss` claim (optional) |
 | `--jwt-audience` | `BURROW_JWT_AUDIENCE` | — | Expected `aud` claim (optional) |
 | `--server-addr` | `BURROW_SERVER_ADDR` | `:8080` | WebSocket and HTTP listen address |
-| `--bridge-addr` | `BURROW_BRIDGE_ADDR` | — | TCP bridge listen address for pod traffic |
+| `--bridge-host` | `BURROW_BRIDGE_HOST` | — | Host to bind per-client bridge listeners on (e.g. `0.0.0.0` or `127.0.0.1`). Each client gets a random port. Empty disables bridging. |
 | `--namespace` | `BURROW_NAMESPACE` | `default` | Namespace for auto-created client Services |
 | `--enable-kube-api` | `BURROW_ENABLE_KUBE_API` | auto | Force Kubernetes Service reconciliation on (`true`) or off (`false`) |
 | `--heartbeat-interval` | `BURROW_HEARTBEAT_INTERVAL` | `10s` | How often to send heartbeats |
@@ -307,25 +308,80 @@ All flags can be set via environment variables with the `BURROW_` prefix. Flags 
 
 ## Authentication
 
-The server accepts JWT bearer tokens only. The token is sent by the client in the WebSocket upgrade request as `Authorization: Bearer <token>`.
+The server accepts JWT bearer tokens only. The token is sent by the client in the WebSocket upgrade request as `Authorization: Bearer <token>`. Authentication is enforced **before** the WebSocket handshake completes — unauthenticated requests receive HTTP 401 without ever establishing a WebSocket connection.
+
+### Transport security (TLS)
+
+The server binary does not terminate TLS. In production:
+
+- Use `wss://` (WebSocket Secure) for all client connections. The bearer token is in an HTTP header and is exposed in plaintext if the connection is unencrypted.
+- Terminate TLS at an Ingress controller or load balancer. The `burrow expose --hostname …` command uses `wss://` automatically and adds nginx `proxy-read-timeout`/`proxy-send-timeout` annotations so long-lived tunnel connections are not dropped.
+- LoadBalancer mode defaults to `ws://` (plain text). Add TLS at the load balancer before exposing to untrusted networks.
+
+### JWT claim validation
+
+On every connection the server verifies:
+
+| Check | Behaviour |
+|---|---|
+| Signature | Must be valid for the configured key and algorithm |
+| `alg` header | Must exactly match `--jwt-alg` (default `RS256`) — `alg: none` and algorithm substitution are always rejected |
+| `exp` | Token must not be expired (30-second clock-skew leeway applied) |
+| `nbf` | If present, token must already be valid-for-use |
+| `iss` | Checked only when `--jwt-issuer` is configured |
+| `aud` | Checked only when `--jwt-audience` is configured |
+
+Setting `--jwt-audience` and `--jwt-issuer` is **strongly recommended** in production: without them a JWT issued for another service is accepted by the burrow server.
 
 ### Identity binding
 
-The JWT `sub` claim must equal the `--client-id` the client registers with. If they differ, the server rejects the connection immediately.
+After the WebSocket handshake, the client sends a `register` frame containing its `client_id`. The server immediately checks that the JWT `sub` claim equals the `client_id`. A mismatch terminates the session with a `client identity mismatch` error. This prevents an authenticated client from claiming a different client's tunnel slot even if they hold a valid token.
 
-### Supported key sources
+### Key sources
 
-Configure exactly one of:
+Exactly one key source must be configured:
 
-| Option | When to use |
-|---|---|
-| `--jwt-hmac-secret` | Development and testing only |
-| `--jwt-public-key-file` | Static asymmetric key (RS256, ES256) |
-| `--jwks-url` | Production; keys rotated without server restart |
+| Option | When to use | Security notes |
+|---|---|---|
+| `--jwt-hmac-secret` | Development and testing **only** | Shared symmetric secret — any party with the secret can forge tokens. Never use in production. |
+| `--jwt-public-key-file` | Static asymmetric key | Server holds only the public key; the private key stays with the token issuer. Supports RS256/RS384/RS512, ES256/ES384/ES512, EdDSA. |
+| `--jwks-url` | Production (OIDC-compatible issuers) | Keys resolved by `kid`, refreshed every `--jwks-refresh` (default `5m`). Supports key rotation without server restart. Cannot be combined with symmetric algorithms (HS*). |
+
+`--jwks-url` is the recommended choice for production: it is asymmetric, OIDC-compatible, and allows key rotation without any server restart.
 
 ### Token rotation
 
-When using `--bearer-token-file`, the client reads the file on every reconnect. Combined with `--token-refresh-window`, the client proactively reconnects before expiry and picks up the new token automatically, making rotation seamless.
+When using `--bearer-token-file`, the client reads the file on every reconnect. The `--token-refresh-window` setting (default `30s`) causes the client to proactively reconnect before token expiry and pick up the refreshed token automatically, making rotation seamless.
+
+### Auth error codes
+
+When authentication fails, the server sends a typed error code. The client uses these codes to choose its retry backoff:
+
+| Code | Cause | Client behaviour |
+|---|---|---|
+| `token_expired` | `exp` claim in the past | Retry with `--client-auth-retry-interval` backoff |
+| `token_not_yet_valid` | `nbf` claim in the future | Retry with `--client-auth-retry-interval` backoff |
+| `invalid_token` | Bad signature, wrong algorithm, or other JWT error | Retry with `--client-auth-retry-interval` backoff |
+| `missing_bearer` | No `Authorization: Bearer` header present | Retry with `--client-auth-retry-interval` backoff |
+| `verifier_config` | Server-side auth misconfiguration | Retry with `--client-auth-retry-interval` backoff |
+
+Auth retries use `--client-auth-retry-interval` (default `5s`) as the base, which is intentionally longer than the transport failure interval (`--client-retry-interval`, default `1s`) to avoid hammering the server with invalid tokens.
+
+### Bridge port security
+
+Each connected client is assigned a dedicated TCP bridge port (random ephemeral port). Bridge connections carry no application-layer authentication — any TCP client that can reach the port will have its traffic forwarded to the client's `--local-target`.
+
+Recommendations:
+
+- Use a Kubernetes [NetworkPolicy](https://kubernetes.io/docs/concepts/services-networking/network-policies/) to restrict which pods can connect to bridge ports. Allow only the pods that legitimately need access to the tunnelled service.
+- Set `--bridge-host` to a specific interface (e.g. `127.0.0.1` for loopback-only in dev). In cluster deployments `0.0.0.0` is typical. Leave it empty to disable bridging entirely.
+- The Kubernetes `Service` auto-created per client (when `--enable-kube-api` is on) exposes the bridge port cluster-internally. Combine with NetworkPolicy to control which workloads can route to it.
+
+### Kubernetes RBAC
+
+The server Pod requires only CRUD on `services` in its own namespace. The `Role` created by `burrow expose` (and in `manifests/role.yaml`) is scoped to this minimum — no cluster-level permissions are needed.
+
+Run the server as a non-root unprivileged user (`runAsNonRoot: true`, `runAsUser: 65534`). Bridge ports are ephemeral (Linux range 32768+), which requires no special Linux capability.
 
 ---
 

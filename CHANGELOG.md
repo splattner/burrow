@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.0](https://github.com/splattner/burrow/compare/v0.4.1...v0.5.0) (2026-05-25)
+
+
+### Features
+
+* allow server to run in tls mode by itself ([#51](https://github.com/splattner/burrow/issues/51)) ([2a2a7d0](https://github.com/splattner/burrow/commit/2a2a7d0f747ba4f302daa5dab613ac04535fd31c))
+
+
+### Bug Fixes
+
+* more small security fixes ([#54](https://github.com/splattner/burrow/issues/54)) ([e57d0b6](https://github.com/splattner/burrow/commit/e57d0b65b9966939ff3a9602dd1c7e628407f21f))
+* small improvements and fixes ([#53](https://github.com/splattner/burrow/issues/53)) ([263caa7](https://github.com/splattner/burrow/commit/263caa76bfe1339acf587122c75f0decab3c74d8))
+
 ## [0.4.1](https://github.com/splattner/burrow/compare/v0.4.0...v0.4.1) (2026-05-25)
 
 

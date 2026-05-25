@@ -98,13 +98,10 @@ func EncodeControlFrame(streamID uint64, frame ControlFrame) ([]byte, error) {
 }
 
 func EncodeDataFrame(streamID uint64, payload []byte) ([]byte, error) {
-	dup := make([]byte, len(payload))
-	copy(dup, payload)
-
 	return EncodeWireFrame(WireFrame{
 		Kind:     KindData,
 		StreamID: streamID,
-		Payload:  dup,
+		Payload:  payload,
 	})
 }
 

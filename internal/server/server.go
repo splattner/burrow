@@ -88,7 +88,10 @@ func (s *Server) Run(ctx context.Context) error {
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	httpServer := &http.Server{Handler: mux}
+	httpServer := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 	ln, err := net.Listen("tcp", s.cfg.ServerAddr)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
@@ -340,16 +343,20 @@ func (s *Server) handleRegister(conn *websocket.Conn, send chan []byte, authID a
 		return nil
 	}
 
+	// Compute the session ID for this connection up front so the counter is
+	// incremented exactly once regardless of whether the session is new or a
+	// reconnect.
+	newSessionID := fmt.Sprintf("sess-%d", s.sessionSeq.Add(1))
+
 	// Look up or create the session.
 	s.sessionsMu.Lock()
 	sess, exists := s.sessions[cf.ClientID]
 	if !exists {
-		sess = newSession(cf.ClientID, authID, fmt.Sprintf("sess-%d", s.sessionSeq.Add(1)))
+		sess = newSession(cf.ClientID, authID, newSessionID)
 		s.sessions[cf.ClientID] = sess
 	}
 	s.sessionsMu.Unlock()
 
-	newSessionID := fmt.Sprintf("sess-%d", s.sessionSeq.Add(1))
 	prevConn, prevSend := sess.swapConn(conn, send, authID, newSessionID)
 	sess.target = cf.Target
 
@@ -378,7 +385,7 @@ func (s *Server) handleRegister(conn *websocket.Conn, send chan []byte, authID a
 
 	// Reconcile the Kubernetes Service for this client.
 	bridgePort := sess.bridgePort()
-	if _, err := s.kube.EnsureClientService(context.Background(), cf.ClientID, cf.Target, bridgePort); err != nil {
+	if _, err := s.kube.EnsureClientService(s.runCtx, cf.ClientID, cf.Target, bridgePort); err != nil {
 		s.log.Errorf("reconcile client service failed client=%q: %v", cf.ClientID, err)
 	}
 
@@ -759,7 +766,7 @@ func (s *Server) markClientDisconnected(clientID string) {
 	if clientID == "" {
 		return
 	}
-	if err := s.kube.MarkClientDisconnected(context.Background(), clientID); err != nil {
+	if err := s.kube.MarkClientDisconnected(s.runCtx, clientID); err != nil {
 		s.log.Errorf("mark client disconnected failed client=%q: %v", clientID, err)
 	}
 }
@@ -794,7 +801,7 @@ func bridgeBindAddr(cfgBridgeHost string) string {
 	return h + ":0"
 }
 
-func trySend(ch chan []byte, payload []byte) (ok bool, full bool) {
+func safeSend(ch chan []byte, payload []byte) (ok bool, full bool) {
 	defer func() {
 		if recover() != nil {
 			ok = false

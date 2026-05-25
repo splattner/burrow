@@ -1,6 +1,10 @@
 package auth
 
 import (
+	"crypto/ecdh"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
@@ -70,8 +74,13 @@ type jwkKey struct {
 	Kty string `json:"kty"`
 	Use string `json:"use"`
 	Alg string `json:"alg,omitempty"`
-	N   string `json:"n,omitempty"`
-	E   string `json:"e,omitempty"`
+	// RSA fields
+	N string `json:"n,omitempty"`
+	E string `json:"e,omitempty"`
+	// EC / OKP (EdDSA) fields
+	Crv string `json:"crv,omitempty"`
+	X   string `json:"x,omitempty"`
+	Y   string `json:"y,omitempty"`
 }
 
 type tunnelClaims struct {
@@ -303,7 +312,18 @@ func (j *jwksVerifier) refresh(expectedAlg string) error {
 			continue
 		}
 
-		key, err := parseJWKRSAKey(jwk)
+		var key any
+		var err error
+		switch jwk.Kty {
+		case "RSA":
+			key, err = parseJWKRSAKey(jwk)
+		case "EC":
+			key, err = parseJWKECKey(jwk)
+		case "OKP":
+			key, err = parseJWKEdDSAKey(jwk)
+		default:
+			continue
+		}
 		if err != nil {
 			continue
 		}
@@ -322,7 +342,7 @@ func (j *jwksVerifier) refresh(expectedAlg string) error {
 	return nil
 }
 
-func parseJWKRSAKey(jwk jwkKey) (any, error) {
+func parseJWKRSAKey(jwk jwkKey) (*rsa.PublicKey, error) {
 	if jwk.Kty != "RSA" {
 		return nil, fmt.Errorf("unsupported jwk kty %q", jwk.Kty)
 	}
@@ -352,6 +372,66 @@ func parseJWKRSAKey(jwk jwkKey) (any, error) {
 	}
 
 	return &rsa.PublicKey{N: modulus, E: exponent}, nil
+}
+
+// parseJWKECKey parses an EC public key from a JWK with kty=="EC".
+// Supported curves: P-256, P-384, P-521.
+func parseJWKECKey(jwk jwkKey) (*ecdsa.PublicKey, error) {
+	var curve elliptic.Curve
+	var ecdhCurve ecdh.Curve
+	switch jwk.Crv {
+	case "P-256":
+		curve = elliptic.P256()
+		ecdhCurve = ecdh.P256()
+	case "P-384":
+		curve = elliptic.P384()
+		ecdhCurve = ecdh.P384()
+	case "P-521":
+		curve = elliptic.P521()
+		ecdhCurve = ecdh.P521()
+	default:
+		return nil, fmt.Errorf("unsupported EC curve %q", jwk.Crv)
+	}
+
+	xBytes, err := base64.RawURLEncoding.DecodeString(jwk.X)
+	if err != nil || len(xBytes) == 0 {
+		return nil, fmt.Errorf("invalid jwk EC x coordinate")
+	}
+	yBytes, err := base64.RawURLEncoding.DecodeString(jwk.Y)
+	if err != nil || len(yBytes) == 0 {
+		return nil, fmt.Errorf("invalid jwk EC y coordinate")
+	}
+
+	// Validate the point is on the curve using crypto/ecdh (crypto/elliptic.IsOnCurve
+	// is deprecated since Go 1.21). Uncompressed point format: 0x04 || x || y.
+	uncompressed := make([]byte, 1+len(xBytes)+len(yBytes))
+	uncompressed[0] = 0x04
+	copy(uncompressed[1:], xBytes)
+	copy(uncompressed[1+len(xBytes):], yBytes)
+	if _, err := ecdhCurve.NewPublicKey(uncompressed); err != nil {
+		return nil, fmt.Errorf("jwk EC point is not on curve %s: %w", jwk.Crv, err)
+	}
+
+	return &ecdsa.PublicKey{
+		Curve: curve,
+		X:     new(big.Int).SetBytes(xBytes),
+		Y:     new(big.Int).SetBytes(yBytes),
+	}, nil
+}
+
+// parseJWKEdDSAKey parses an Ed25519 public key from a JWK with kty=="OKP".
+func parseJWKEdDSAKey(jwk jwkKey) (ed25519.PublicKey, error) {
+	if jwk.Crv != "Ed25519" {
+		return nil, fmt.Errorf("unsupported OKP curve %q", jwk.Crv)
+	}
+	xBytes, err := base64.RawURLEncoding.DecodeString(jwk.X)
+	if err != nil {
+		return nil, fmt.Errorf("invalid jwk EdDSA x: %w", err)
+	}
+	if len(xBytes) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("invalid Ed25519 key size: got %d want %d", len(xBytes), ed25519.PublicKeySize)
+	}
+	return ed25519.PublicKey(xBytes), nil
 }
 
 func bearerToken(r *http.Request) string {

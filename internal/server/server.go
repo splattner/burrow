@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -82,7 +83,9 @@ func (s *Server) Run(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/metrics", s.handleMetrics)
-	mux.HandleFunc("/api/clients/", s.handleClientAPI)
+	if s.cfg.EnableClientAPI {
+		mux.HandleFunc("/api/clients/", s.handleClientAPI)
+	}
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -249,7 +252,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	authID, authErr := s.authenticateRequest(r)
 	if authErr != nil {
 		code := auth.ClassifyError(authErr)
-		http.Error(w, fmt.Sprintf("unauthorized: code=%s reason=%s", code, authErr.Error()), http.StatusUnauthorized)
+		http.Error(w, fmt.Sprintf("unauthorized: code=%s reason=%s", code, sanitizeForLog(authErr.Error())), http.StatusUnauthorized)
 		return
 	}
 
@@ -691,6 +694,19 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 // Returns the bridge listener address for a connected client as plain text,
 // or 404 if the client is not connected or has no bridge listener yet.
 func (s *Server) handleClientAPI(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.APIToken != "" {
+		const prefix = "Bearer "
+		authz := strings.TrimSpace(r.Header.Get("Authorization"))
+		var got string
+		if strings.HasPrefix(authz, prefix) {
+			got = strings.TrimSpace(authz[len(prefix):])
+		}
+		if subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.APIToken)) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
+
 	// Expect path: /api/clients/{clientID}/bridge-addr
 	path := strings.TrimPrefix(r.URL.Path, "/api/clients/")
 	clientID, suffix, ok := strings.Cut(path, "/")
@@ -746,7 +762,7 @@ func (s *Server) authenticateRequest(r *http.Request) (auth.Identity, error) {
 	}
 	authID, err := s.auth.Authenticate(r)
 	if err != nil {
-		s.log.Warnf("authorization rejected: %v", err)
+		s.log.Warnf("authorization rejected: %s", sanitizeForLog(err.Error()))
 		return auth.Identity{}, err
 	}
 	return authID, nil
@@ -815,4 +831,13 @@ func safeSend(ch chan []byte, payload []byte) (ok bool, full bool) {
 	default:
 		return true, true
 	}
+}
+
+// sanitizeForLog replaces CR and LF characters in s with their printable
+// escape sequences so that attacker-controlled values (e.g. JWT claim fields)
+// cannot inject spurious lines into structured log output or HTTP responses.
+func sanitizeForLog(s string) string {
+	s = strings.ReplaceAll(s, "\r", `\r`)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	return s
 }

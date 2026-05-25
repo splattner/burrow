@@ -180,10 +180,14 @@ This is the fastest way to set up a tunnel without managing manifests manually.
 
 ### Modes
 
+The tunnel mode (whether an Ingress is created) is controlled by `--hostname`. The Kubernetes Service type is controlled separately by `--service-type`.
+
 | Mode | When | Server URL |
 |---|---|---|
 | **Ingress** | `--hostname` is set | `wss://<hostname>/ws` |
 | **LoadBalancer** | `--hostname` not set | `ws://<lb-ip>:<server-port>/ws` |
+
+`--service-type auto` (default) resolves to `ClusterIP` in Ingress mode and `LoadBalancer` otherwise. Override with an explicit type when needed — e.g. `--service-type NodePort` to use a node port even without an Ingress.
 
 ### Quick examples
 
@@ -221,7 +225,7 @@ burrow expose delete --client-id api
 | `Role burrow-<id>` | Grants CRUD on `services` in the namespace |
 | `RoleBinding burrow-<id>` | Binds the Role to the ServiceAccount |
 | `Deployment burrow-<id>` | Runs the burrow server Pod |
-| `Service burrow-<id>` | ClusterIP (Ingress mode) or LoadBalancer |
+| `Service burrow-<id>` | Type determined by `--service-type` (default: `ClusterIP` with Ingress, `LoadBalancer` otherwise) |
 | `Ingress burrow-<id>` | Routes external HTTPS traffic to the server (Ingress mode only) |
 
 All resources share the labels `app.kubernetes.io/managed-by=burrow` and `burrow.dev/server-name=<name>` (where `<name>` is `--server-name` if provided, otherwise `--client-id`).
@@ -246,7 +250,9 @@ burrow expose --client-id api --local-target 127.0.0.1:8080 \
 |---|---|---|
 | `--client-id` | — | Unique identifier for this session (required) |
 | `--local-target` | — | Local `host:port` to forward tunnel traffic to (required unless `--dry-run`) |
-| `--hostname` | — | Ingress hostname; omit for LoadBalancer mode |
+| `--hostname` | — | Ingress hostname; when set, an Ingress resource is created |
+| `--service-type` | `auto` | Kubernetes Service type: `auto`, `ClusterIP`, `NodePort`, `LoadBalancer`, `None`. `auto` uses `ClusterIP` with `--hostname`, `LoadBalancer` otherwise |
+| `--connect-addr` | — | IP address (or `host:port`) to connect to at the TCP level instead of resolving `--hostname` via DNS. The hostname is still used for TLS SNI. Useful when DNS is not yet propagated after Ingress creation. |
 | `--tls-secret` | — | TLS Secret name for Ingress; omit to use the controller's default cert |
 | `--ingress-class` | auto-detect | IngressClass name |
 | `--ingress-annotation` | — | Extra Ingress annotation in `key=value` format (repeatable) |
@@ -281,6 +287,8 @@ All flags can be set via environment variables with the `BURROW_` prefix. Flags 
 | `--jwt-issuer` | `BURROW_JWT_ISSUER` | — | Expected `iss` claim (optional) |
 | `--jwt-audience` | `BURROW_JWT_AUDIENCE` | — | Expected `aud` claim (optional) |
 | `--server-addr` | `BURROW_SERVER_ADDR` | `:8080` | WebSocket and HTTP listen address |
+| `--tls-cert` | `BURROW_TLS_CERT` | — | Path to TLS certificate PEM file; enables server-side HTTPS/WSS when set together with `--tls-key` |
+| `--tls-key` | `BURROW_TLS_KEY` | — | Path to TLS private key PEM file; enables server-side HTTPS/WSS when set together with `--tls-cert` |
 | `--bridge-host` | `BURROW_BRIDGE_HOST` | — | Host to bind per-client bridge listeners on (e.g. `0.0.0.0` or `127.0.0.1`). Each client gets a random port. Empty disables bridging. |
 | `--namespace` | `BURROW_NAMESPACE` | `default` | Namespace for auto-created client Services |
 | `--enable-kube-api` | `BURROW_ENABLE_KUBE_API` | auto | Force Kubernetes Service reconciliation on (`true`) or off (`false`) |
@@ -302,6 +310,7 @@ All flags can be set via environment variables with the `BURROW_` prefix. Flags 
 | `--token-refresh-window` | `BURROW_TOKEN_REFRESH_WINDOW` | `30s` | Reconnect this long before the token expires |
 | `--client-retry-interval` | `BURROW_CLIENT_RETRY_INTERVAL` | `1s` | Base backoff interval for transport failures |
 | `--client-auth-retry-interval` | `BURROW_CLIENT_AUTH_RETRY_INTERVAL` | `5s` | Base backoff interval for auth failures |
+| `--tls-skip-verify` | `BURROW_TLS_SKIP_VERIFY` | `false` | Disable TLS certificate verification (self-signed or expired certs). Not safe for production. |
 | `--log-level` | `BURROW_LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
 
 ---
@@ -312,11 +321,37 @@ The server accepts JWT bearer tokens only. The token is sent by the client in th
 
 ### Transport security (TLS)
 
-The server binary does not terminate TLS. In production:
+**Server-side TLS** — the server can terminate TLS directly by providing a certificate and private key:
+
+```bash
+burrow server \
+  --tls-cert /etc/tls/tls.crt \
+  --tls-key  /etc/tls/tls.key \
+  --jwt-hmac-secret …
+```
+
+When both `--tls-cert` and `--tls-key` are set the server listens with HTTPS/WSS and the client must use `wss://`. The scheme in `WSURL()` switches automatically when using `burrow expose`. Both flags must be provided together — setting only one is a startup error.
+
+This is most useful when running without an Ingress controller (e.g. bare LoadBalancer) and you still need transport encryption.
+
+In other deployments:
 
 - Use `wss://` (WebSocket Secure) for all client connections. The bearer token is in an HTTP header and is exposed in plaintext if the connection is unencrypted.
 - Terminate TLS at an Ingress controller or load balancer. The `burrow expose --hostname …` command uses `wss://` automatically and adds nginx `proxy-read-timeout`/`proxy-send-timeout` annotations so long-lived tunnel connections are not dropped.
-- LoadBalancer mode defaults to `ws://` (plain text). Add TLS at the load balancer before exposing to untrusted networks.
+- LoadBalancer mode without server-side TLS defaults to `ws://` (plain text). Add TLS at the load balancer or enable `--tls-cert`/`--tls-key` before exposing to untrusted networks.
+
+**Client — skip TLS verification**
+
+For environments where the server certificate is self-signed or not yet trusted (e.g. during initial setup), the client can skip certificate verification:
+
+```bash
+burrow client \
+  --server-url wss://burrow.example.com/ws \
+  --tls-skip-verify \
+  …
+```
+
+> **Warning:** `--tls-skip-verify` disables all certificate validation and makes the connection vulnerable to man-in-the-middle attacks. Use only in trusted, controlled environments.
 
 ### JWT claim validation
 

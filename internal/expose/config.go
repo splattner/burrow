@@ -29,11 +29,17 @@ type Config struct {
 	KubeContext string
 	Namespace   string
 
-	// Exposure mode: Hostname set → Ingress; unset → LoadBalancer
+	// Exposure mode: Hostname set → Ingress; unset → determines service type
 	Hostname           string
 	TLSSecret          string // optional; omit to use ingress controller default cert
 	IngressClass       string // empty = auto-detect cluster default
 	IngressAnnotations map[string]string
+
+	// ServiceType controls the Kubernetes Service type for the burrow server.
+	// "auto" (default) resolves to ClusterIP when an Ingress is configured
+	// (Hostname is set) and LoadBalancer otherwise. Accepted explicit values:
+	// "ClusterIP", "NodePort", "LoadBalancer", "None".
+	ServiceType string
 
 	// Container image; defaults to ghcr.io/splattner/burrow:<version>
 	Image string

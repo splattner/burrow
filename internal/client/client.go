@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -164,43 +165,55 @@ func (c *Client) runSession(ctx context.Context) error {
 	}
 }
 
-// buildDialer returns a websocket.Dialer that connects to cfg.ConnectAddr at
-// the TCP level (bypassing DNS for the hostname) while keeping cfg.ServerURL
-// intact for TLS SNI and the HTTP Host header. If ConnectAddr is empty the
-// default dialer is returned unchanged.
+// buildDialer returns a websocket.Dialer configured for the current client
+// settings. It handles two optional behaviours, which may be combined:
+//
+//   - ConnectAddr: connect to a specific IP/host:port at the TCP level while
+//     keeping cfg.ServerURL for TLS SNI and the HTTP Host header.
+//   - TLSSkipVerify: disable TLS certificate verification (self-signed certs,
+//     expired certs, etc.). Logs a warning when active.
 func (c *Client) buildDialer() *websocket.Dialer {
-	if c.cfg.ConnectAddr == "" {
+	if c.cfg.ConnectAddr == "" && !c.cfg.TLSSkipVerify {
 		return websocket.DefaultDialer
 	}
 
-	// If ConnectAddr has no port, borrow the port from the server URL.
-	connectAddr := c.cfg.ConnectAddr
-	if _, _, err := net.SplitHostPort(connectAddr); err != nil {
-		u, parseErr := url.Parse(c.cfg.ServerURL)
-		port := ""
-		if parseErr == nil {
-			port = u.Port()
-		}
-		if port == "" {
-			switch {
-			case strings.HasPrefix(c.cfg.ServerURL, "wss://"), strings.HasPrefix(c.cfg.ServerURL, "https://"):
-				port = "443"
-			default:
-				port = "80"
-			}
-		}
-		connectAddr = net.JoinHostPort(connectAddr, port)
-	}
-
-	c.log.Infof("connect-addr override: TCP connection will go to %s", connectAddr)
-	addr := connectAddr
-	return &websocket.Dialer{
+	dialer := &websocket.Dialer{
 		Proxy:            websocket.DefaultDialer.Proxy,
 		HandshakeTimeout: websocket.DefaultDialer.HandshakeTimeout,
-		NetDialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, network, addr)
-		},
 	}
+
+	if c.cfg.TLSSkipVerify {
+		c.log.Warn("TLS certificate verification disabled (--tls-skip-verify): do not use in production")
+		dialer.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
+	}
+
+	if c.cfg.ConnectAddr != "" {
+		// If ConnectAddr has no port, borrow the port from the server URL.
+		connectAddr := c.cfg.ConnectAddr
+		if _, _, err := net.SplitHostPort(connectAddr); err != nil {
+			u, parseErr := url.Parse(c.cfg.ServerURL)
+			port := ""
+			if parseErr == nil {
+				port = u.Port()
+			}
+			if port == "" {
+				switch {
+				case strings.HasPrefix(c.cfg.ServerURL, "wss://"), strings.HasPrefix(c.cfg.ServerURL, "https://"):
+					port = "443"
+				default:
+					port = "80"
+				}
+			}
+			connectAddr = net.JoinHostPort(connectAddr, port)
+		}
+		c.log.Infof("connect-addr override: TCP connection will go to %s", connectAddr)
+		addr := connectAddr
+		dialer.NetDialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, addr)
+		}
+	}
+
+	return dialer
 }
 
 func (c *Client) resolveBearerToken() (string, error) {

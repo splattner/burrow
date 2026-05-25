@@ -101,11 +101,20 @@ func (s *Server) Run(ctx context.Context) error {
 	close(s.startedCh)
 
 	errCh := make(chan error, 1)
-	go func() {
-		if serveErr := httpServer.Serve(ln); serveErr != nil && serveErr != http.ErrServerClosed {
-			errCh <- serveErr
-		}
-	}()
+	if s.cfg.TLSCertFile != "" {
+		s.log.Infof("TLS enabled: cert=%s", s.cfg.TLSCertFile)
+		go func() {
+			if serveErr := httpServer.ServeTLS(ln, s.cfg.TLSCertFile, s.cfg.TLSKeyFile); serveErr != nil && serveErr != http.ErrServerClosed {
+				errCh <- serveErr
+			}
+		}()
+	} else {
+		go func() {
+			if serveErr := httpServer.Serve(ln); serveErr != nil && serveErr != http.ErrServerClosed {
+				errCh <- serveErr
+			}
+		}()
+	}
 
 	go s.staleSweepLoop(ctx)
 
@@ -168,6 +177,9 @@ func (s *Server) WSURL() string {
 	defer s.listenMu.RUnlock()
 	if s.listenURL == "" {
 		return ""
+	}
+	if s.cfg.TLSCertFile != "" {
+		return "wss://" + s.listenURL + "/ws"
 	}
 	return "ws://" + s.listenURL + "/ws"
 }

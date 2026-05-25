@@ -23,9 +23,12 @@ type Config struct {
 	JWKSURL            string
 	JWKSRefresh        time.Duration
 	ServerAddr         string
+	TLSCertFile        string
+	TLSKeyFile         string
 	BridgeHost         string
 	ServerURL          string
 	ConnectAddr        string
+	TLSSkipVerify      bool
 	ClientID           string
 	LocalTarget        string
 	Namespace          string
@@ -106,9 +109,12 @@ func LoadFromViper(v *viper.Viper) (Config, error) {
 		JWKSURL:            strings.TrimSpace(v.GetString("jwks-url")),
 		JWKSRefresh:        jwksRefresh,
 		ServerAddr:         fallbackString(v.GetString("server-addr"), ":8080"),
+		TLSCertFile:        strings.TrimSpace(v.GetString("tls-cert")),
+		TLSKeyFile:         strings.TrimSpace(v.GetString("tls-key")),
 		BridgeHost:         strings.TrimSpace(v.GetString("bridge-host")),
 		ServerURL:          strings.TrimSpace(v.GetString("server-url")),
 		ConnectAddr:        strings.TrimSpace(v.GetString("connect-addr")),
+		TLSSkipVerify:      v.GetBool("tls-skip-verify"),
 		ClientID:           strings.TrimSpace(v.GetString("client-id")),
 		LocalTarget:        strings.TrimSpace(v.GetString("local-target")),
 		Namespace:          fallbackString(v.GetString("namespace"), "default"),
@@ -127,6 +133,12 @@ func LoadFromViper(v *viper.Viper) (Config, error) {
 func ValidateServer(cfg Config) error {
 	if cfg.JWTHMACSecret == "" && cfg.JWTPublicKeyFile == "" && cfg.JWKSURL == "" {
 		return fmt.Errorf("server requires a JWT verifier source: set --jwt-hmac-secret / BURROW_JWT_HMAC_SECRET, --jwt-public-key-file / BURROW_JWT_PUBLIC_KEY_FILE, or --jwks-url / BURROW_JWKS_URL")
+	}
+	if cfg.TLSCertFile != "" && cfg.TLSKeyFile == "" {
+		return fmt.Errorf("--tls-cert / BURROW_TLS_CERT requires --tls-key / BURROW_TLS_KEY to also be set")
+	}
+	if cfg.TLSKeyFile != "" && cfg.TLSCertFile == "" {
+		return fmt.Errorf("--tls-key / BURROW_TLS_KEY requires --tls-cert / BURROW_TLS_CERT to also be set")
 	}
 	return nil
 }

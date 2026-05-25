@@ -48,6 +48,7 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 	flags.String("server-url", "", "Server WebSocket URL for client mode")
 	flags.String("client-id", "", "Unique client ID")
 	flags.String("local-target", "", "Local host:port to expose")
+	flags.Bool("tls-skip-verify", false, "Disable TLS certificate verification (for self-signed or expired certificates). Not recommended in production.")
 
 	for _, key := range []string{
 		"bearer-token",
@@ -58,6 +59,7 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 		"server-url",
 		"client-id",
 		"local-target",
+		"tls-skip-verify",
 	} {
 		if err := v.BindPFlag(key, flags.Lookup(key)); err != nil {
 			panic(err)

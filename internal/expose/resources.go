@@ -164,10 +164,7 @@ func (c *Config) buildDeployment() (*appsv1.Deployment, error) {
 }
 
 func (c *Config) buildService() (*corev1.Service, error) {
-	svcType := corev1.ServiceTypeClusterIP
-	if !c.IngressMode() {
-		svcType = corev1.ServiceTypeLoadBalancer
-	}
+	svcType := c.resolvedServiceType()
 
 	svc := &corev1.Service{
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
@@ -193,6 +190,19 @@ func (c *Config) buildService() (*corev1.Service, error) {
 	}
 
 	return applyPatch(svc, c.PatchService, corev1.Service{})
+}
+
+// resolvedServiceType returns the Kubernetes ServiceType to use.
+// When ServiceType is "" or "auto": ClusterIP in Ingress mode, LoadBalancer otherwise.
+// Otherwise the configured value is returned verbatim.
+func (c *Config) resolvedServiceType() corev1.ServiceType {
+	if c.ServiceType == "" || c.ServiceType == "auto" {
+		if c.IngressMode() {
+			return corev1.ServiceTypeClusterIP
+		}
+		return corev1.ServiceTypeLoadBalancer
+	}
+	return corev1.ServiceType(c.ServiceType)
 }
 
 func (c *Config) buildIngress() (*networkingv1.Ingress, error) {

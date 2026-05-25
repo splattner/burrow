@@ -137,6 +137,33 @@ func TestBuildService_ClusterIPInIngressMode(t *testing.T) {
 	assert.Equal(t, corev1.ServiceTypeClusterIP, svc.Spec.Type)
 }
 
+func TestBuildService_ExplicitServiceTypeOverridesAuto(t *testing.T) {
+	// NodePort explicitly, even with a hostname (Ingress mode)
+	cfg := testCfg()
+	cfg.Hostname = "tunnel.example.com"
+	cfg.ServiceType = "NodePort"
+	svc, err := cfg.buildService()
+	require.NoError(t, err)
+	assert.Equal(t, corev1.ServiceTypeNodePort, svc.Spec.Type)
+}
+
+func TestBuildService_ExplicitLoadBalancerInIngressMode(t *testing.T) {
+	cfg := testCfg()
+	cfg.Hostname = "tunnel.example.com"
+	cfg.ServiceType = "LoadBalancer"
+	svc, err := cfg.buildService()
+	require.NoError(t, err)
+	assert.Equal(t, corev1.ServiceTypeLoadBalancer, svc.Spec.Type)
+}
+
+func TestBuildService_ExplicitClusterIPWithoutHostname(t *testing.T) {
+	cfg := testCfg()
+	cfg.ServiceType = "ClusterIP"
+	svc, err := cfg.buildService()
+	require.NoError(t, err)
+	assert.Equal(t, corev1.ServiceTypeClusterIP, svc.Spec.Type)
+}
+
 func TestBuildService_SelectorMatchesDeployment(t *testing.T) {
 	cfg := testCfg()
 	svc, err := cfg.buildService()

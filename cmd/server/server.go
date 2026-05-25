@@ -51,6 +51,8 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 	flags.String("jwt-issuer", "", "Expected JWT issuer")
 	flags.String("jwt-audience", "", "Expected JWT audience")
 	flags.String("server-addr", ":8080", "Server listen address")
+	flags.String("tls-cert", "", "Path to TLS certificate PEM file; enables server-side TLS when set together with --tls-key")
+	flags.String("tls-key", "", "Path to TLS private key PEM file; enables server-side TLS when set together with --tls-cert")
 	flags.String("bridge-host", "", "Host to bind per-client bridge listeners on (e.g. 0.0.0.0 or 127.0.0.1). Each client gets a random port. Empty disables bridging.")
 	flags.String("enable-kube-api", "", "Enable Kubernetes Service API reconciliation (true|false, empty=auto)")
 	flags.String("namespace", "default", "Namespace for service reconciliation")
@@ -68,6 +70,8 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 		"jwt-issuer",
 		"jwt-audience",
 		"server-addr",
+		"tls-cert",
+		"tls-key",
 		"bridge-host",
 		"enable-kube-api",
 		"namespace",

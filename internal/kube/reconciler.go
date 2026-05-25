@@ -163,12 +163,16 @@ func (r *Reconciler) MarkClientDisconnected(ctx context.Context, clientID string
 }
 
 func (r *Reconciler) SweepStaleServices(ctx context.Context, maxDisconnectedAge time.Duration, now time.Time) []string {
-	_ = ctx
 	if maxDisconnectedAge <= 0 {
 		return nil
 	}
 
-	deleted := make([]string, 0)
+	type victim struct{ clientID, serviceName string }
+	var victims []victim
+
+	// Identify stale clients and remove them from in-memory state while holding
+	// the lock. Kubernetes API calls happen after the lock is released so that
+	// new client connections are never blocked by slow API calls.
 	r.mu.Lock()
 	for clientID, state := range r.clients {
 		if state.Connected || state.DisconnectedAt.IsZero() {
@@ -177,14 +181,19 @@ func (r *Reconciler) SweepStaleServices(ctx context.Context, maxDisconnectedAge 
 		if now.Sub(state.DisconnectedAt) < maxDisconnectedAge {
 			continue
 		}
+		victims = append(victims, victim{clientID, state.ServiceName})
 		delete(r.clients, clientID)
 		delete(r.services, clientID)
-		if r.client != nil {
-			_ = r.client.CoreV1().Services(r.namespace).Delete(ctx, state.ServiceName, metav1.DeleteOptions{})
-		}
-		deleted = append(deleted, clientID)
 	}
 	r.mu.Unlock()
+
+	deleted := make([]string, 0, len(victims))
+	for _, v := range victims {
+		if r.client != nil {
+			_ = r.client.CoreV1().Services(r.namespace).Delete(ctx, v.serviceName, metav1.DeleteOptions{})
+		}
+		deleted = append(deleted, v.clientID)
+	}
 
 	sort.Strings(deleted)
 	return deleted

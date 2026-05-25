@@ -23,6 +23,8 @@ type Config struct {
 	JWKSURL            string
 	JWKSRefresh        time.Duration
 	ServerAddr         string
+	APIToken           string
+	EnableClientAPI    bool
 	TLSCertFile        string
 	TLSKeyFile         string
 	BridgeHost         string
@@ -109,6 +111,8 @@ func LoadFromViper(v *viper.Viper) (Config, error) {
 		JWKSURL:            strings.TrimSpace(v.GetString("jwks-url")),
 		JWKSRefresh:        jwksRefresh,
 		ServerAddr:         fallbackString(v.GetString("server-addr"), ":8080"),
+		APIToken:           strings.TrimSpace(v.GetString("api-token")),
+		EnableClientAPI:    v.GetBool("enable-client-api"),
 		TLSCertFile:        strings.TrimSpace(v.GetString("tls-cert")),
 		TLSKeyFile:         strings.TrimSpace(v.GetString("tls-key")),
 		BridgeHost:         strings.TrimSpace(v.GetString("bridge-host")),

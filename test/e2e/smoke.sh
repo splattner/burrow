@@ -330,6 +330,7 @@ echo "[e2e] starting tunnel server on ${SERVER_ADDR} (bridge bind ${BRIDGE_BIND}
   BURROW_JWT_AUDIENCE="$JWT_AUDIENCE" \
   BURROW_SERVER_ADDR="$SERVER_ADDR" \
   BURROW_BRIDGE_HOST="$BRIDGE_BIND" \
+  BURROW_ENABLE_CLIENT_API="true" \
   exec go run ./cmd/root server
 ) >/tmp/burrow-e2e-server.log 2>&1 &
 SERVER_PID=$!

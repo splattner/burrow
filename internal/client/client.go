@@ -60,6 +60,9 @@ func New(cfg config.Config, logger *logrus.Logger) *Client {
 
 func (c *Client) Run(ctx context.Context) error {
 	c.log.Infof("client mode: server=%s client_id=%s target=%s", c.cfg.ServerURL, c.cfg.ClientID, c.cfg.LocalTarget)
+	if c.cfg.TLSSkipVerify {
+		c.log.Warn("TLS certificate verification disabled (--tls-skip-verify): do not use in production")
+	}
 	if c.cfg.ServerURL == "" {
 		return fmt.Errorf("server URL is required (--server-url / BURROW_SERVER_URL)")
 	}
@@ -183,7 +186,6 @@ func (c *Client) buildDialer() *websocket.Dialer {
 	}
 
 	if c.cfg.TLSSkipVerify {
-		c.log.Warn("TLS certificate verification disabled (--tls-skip-verify): do not use in production")
 		dialer.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
 	}
 

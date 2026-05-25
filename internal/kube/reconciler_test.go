@@ -84,6 +84,9 @@ func TestReconcilerKubeClientCreateAndUpdate(t *testing.T) {
 	if svc.Annotations[annotationTargetKey] != firstTarget {
 		t.Fatalf("expected target annotation %q, got %q", firstTarget, svc.Annotations[annotationTargetKey])
 	}
+	if svc.Spec.Ports[0].Port != 5432 {
+		t.Fatalf("expected service port 5432, got %d", svc.Spec.Ports[0].Port)
+	}
 	if svc.Spec.Ports[0].TargetPort.IntVal != 1111 {
 		t.Fatalf("expected service targetPort 1111, got %d", svc.Spec.Ports[0].TargetPort.IntVal)
 	}
@@ -100,6 +103,9 @@ func TestReconcilerKubeClientCreateAndUpdate(t *testing.T) {
 	}
 	if svc.Annotations[annotationTargetKey] != updatedTarget {
 		t.Fatalf("expected updated target annotation %q, got %q", updatedTarget, svc.Annotations[annotationTargetKey])
+	}
+	if svc.Spec.Ports[0].Port != 15432 {
+		t.Fatalf("expected service port 15432 after update, got %d", svc.Spec.Ports[0].Port)
 	}
 	if svc.Labels[labelClientIDKey] != "client-a" {
 		t.Fatalf("expected label %q to stay set", labelClientIDKey)

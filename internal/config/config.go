@@ -25,6 +25,7 @@ type Config struct {
 	ServerAddr         string
 	BridgeHost         string
 	ServerURL          string
+	ConnectAddr        string
 	ClientID           string
 	LocalTarget        string
 	Namespace          string
@@ -107,6 +108,7 @@ func LoadFromViper(v *viper.Viper) (Config, error) {
 		ServerAddr:         fallbackString(v.GetString("server-addr"), ":8080"),
 		BridgeHost:         strings.TrimSpace(v.GetString("bridge-host")),
 		ServerURL:          strings.TrimSpace(v.GetString("server-url")),
+		ConnectAddr:        strings.TrimSpace(v.GetString("connect-addr")),
 		ClientID:           strings.TrimSpace(v.GetString("client-id")),
 		LocalTarget:        strings.TrimSpace(v.GetString("local-target")),
 		Namespace:          fallbackString(v.GetString("namespace"), "default"),

@@ -47,6 +47,12 @@ type Config struct {
 	WaitTimeout time.Duration
 	DryRun      bool
 
+	// ConnectAddr overrides the TCP dial address for the client connection.
+	// When set the client connects to this IP (or host:port) instead of
+	// resolving the hostname from --hostname. The server URL keeps the hostname
+	// for TLS SNI and the HTTP Host header. Only meaningful in Ingress mode.
+	ConnectAddr string
+
 	// Strategic merge patches (JSON) applied to resources before creation
 	PatchDeployment string
 	PatchService    string

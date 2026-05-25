@@ -89,6 +89,7 @@ func (e *Exposer) Run(ctx context.Context) error {
 	clientCfg.ServerURL = serverURL
 	clientCfg.ClientID = e.cfg.ClientID
 	clientCfg.LocalTarget = e.cfg.LocalTarget
+	clientCfg.ConnectAddr = e.cfg.ConnectAddr
 	return clientimpl.New(clientCfg, e.logger).Run(ctx)
 }
 

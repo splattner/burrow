@@ -344,6 +344,9 @@ func (s *Server) handleRegister(conn *websocket.Conn, send chan []byte, authID a
 	if prevConn == nil {
 		// First registration for this client.
 		s.metrics.IncSessions()
+		s.log.Infof("client connected: client_id=%q target=%q session=%s", cf.ClientID, cf.Target, sess.sessionID)
+	} else {
+		s.log.Infof("client reconnected: client_id=%q target=%q session=%s", cf.ClientID, cf.Target, sess.sessionID)
 	}
 
 	// Close the old connection to unblock the previous readPump goroutine.

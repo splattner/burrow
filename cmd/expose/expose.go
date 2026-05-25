@@ -62,6 +62,7 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 	flags.String("kube-context", "", "Kubernetes context to use (default: current context)")
 	flags.String("namespace", "", "Kubernetes namespace (default: context namespace)")
 	flags.String("hostname", "", "Hostname for Ingress mode; omit to use LoadBalancer")
+	flags.String("connect-addr", "", "IP address (or host:port) to connect to instead of resolving the --hostname via DNS. Useful when the DNS record is not yet available after Ingress creation. The hostname is still used for TLS SNI and the HTTP Host header.")
 	flags.String("tls-secret", "", "TLS Secret name for Ingress (optional; uses controller default if unset)")
 	flags.String("ingress-class", "", "IngressClass name (default: auto-detect cluster default)")
 	flags.StringArray("ingress-annotation", nil, "Extra Ingress annotation in key=value format (repeatable)")
@@ -133,6 +134,7 @@ func buildConfig(cmd *cobra.Command) (*exposepkg.Config, error) {
 	kubeContext, _ := flags.GetString("kube-context")
 	namespace, _ := flags.GetString("namespace")
 	hostname, _ := flags.GetString("hostname")
+	connectAddr, _ := flags.GetString("connect-addr")
 	tlsSecret, _ := flags.GetString("tls-secret")
 	ingressClass, _ := flags.GetString("ingress-class")
 	rawAnnotations, _ := flags.GetStringArray("ingress-annotation")
@@ -166,6 +168,7 @@ func buildConfig(cmd *cobra.Command) (*exposepkg.Config, error) {
 		KubeContext:        kubeContext,
 		Namespace:          namespace,
 		Hostname:           hostname,
+		ConnectAddr:        connectAddr,
 		TLSSecret:          tlsSecret,
 		IngressClass:       ingressClass,
 		IngressAnnotations: annotations,

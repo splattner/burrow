@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,7 +34,6 @@ const (
 
 	defaultServicePortName = "tcp"
 	defaultServicePort     = 80
-	defaultBridgePort      = 1111
 )
 
 type ServiceRecord struct {
@@ -270,7 +271,7 @@ func (r *Reconciler) applyServiceRecord(ctx context.Context, record ServiceRecor
 			return fmt.Errorf("get service %s: %w", record.Name, err)
 		}
 
-		_, createErr := svcClient.Create(ctx, buildService(record), metav1.CreateOptions{})
+		_, createErr := svcClient.Create(ctx, buildService(record, bridgePort), metav1.CreateOptions{})
 		if createErr != nil {
 			if !apierrors.IsAlreadyExists(createErr) {
 				return fmt.Errorf("create service %s: %w", record.Name, createErr)
@@ -285,10 +286,7 @@ func (r *Reconciler) applyServiceRecord(ctx context.Context, record ServiceRecor
 		}
 	}
 
-	desired := buildService(record)
-	if bridgePort > 0 {
-		desired.Spec.Ports[0].TargetPort = intstr.FromInt32(bridgePort)
-	}
+	desired := buildService(record, bridgePort)
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		latest, getErr := svcClient.Get(ctx, existing.Name, metav1.GetOptions{})
 		if getErr != nil {
@@ -305,7 +303,26 @@ func (r *Reconciler) applyServiceRecord(ctx context.Context, record ServiceRecor
 	})
 }
 
-func buildService(record ServiceRecord) *corev1.Service {
+// targetPortFromAddress parses the port from a host:port address string.
+// Falls back to defaultServicePort if parsing fails.
+func targetPortFromAddress(addr string) int32 {
+	_, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return defaultServicePort
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 {
+		return defaultServicePort
+	}
+	return int32(port)
+}
+
+func buildService(record ServiceRecord, bridgePort int32) *corev1.Service {
+	svcPort := targetPortFromAddress(record.Target)
+	targetPort := bridgePort
+	if targetPort <= 0 {
+		targetPort = svcPort
+	}
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        record.Name,
@@ -321,8 +338,8 @@ func buildService(record ServiceRecord) *corev1.Service {
 			Ports: []corev1.ServicePort{
 				{
 					Name:       defaultServicePortName,
-					Port:       defaultServicePort,
-					TargetPort: intstr.FromInt32(defaultBridgePort),
+					Port:       svcPort,
+					TargetPort: intstr.FromInt32(targetPort),
 					Protocol:   corev1.ProtocolTCP,
 				},
 			},

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -107,7 +108,7 @@ func (c *Client) runSession(ctx context.Context) error {
 		headers.Set("Authorization", "Bearer "+bearer)
 	}
 
-	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, c.cfg.ServerURL, headers)
+	conn, resp, err := c.buildDialer().DialContext(ctx, c.cfg.ServerURL, headers)
 	if err != nil {
 		if resp != nil && resp.StatusCode == http.StatusUnauthorized {
 			return classifyUnauthorizedResponse(resp)
@@ -160,6 +161,45 @@ func (c *Client) runSession(ctx context.Context) error {
 		close(send)
 		_ = conn.Close()
 		return fmt.Errorf("%w: reached refresh window before token expiry", errTokenRefreshRequired)
+	}
+}
+
+// buildDialer returns a websocket.Dialer that connects to cfg.ConnectAddr at
+// the TCP level (bypassing DNS for the hostname) while keeping cfg.ServerURL
+// intact for TLS SNI and the HTTP Host header. If ConnectAddr is empty the
+// default dialer is returned unchanged.
+func (c *Client) buildDialer() *websocket.Dialer {
+	if c.cfg.ConnectAddr == "" {
+		return websocket.DefaultDialer
+	}
+
+	// If ConnectAddr has no port, borrow the port from the server URL.
+	connectAddr := c.cfg.ConnectAddr
+	if _, _, err := net.SplitHostPort(connectAddr); err != nil {
+		u, parseErr := url.Parse(c.cfg.ServerURL)
+		port := ""
+		if parseErr == nil {
+			port = u.Port()
+		}
+		if port == "" {
+			switch {
+			case strings.HasPrefix(c.cfg.ServerURL, "wss://"), strings.HasPrefix(c.cfg.ServerURL, "https://"):
+				port = "443"
+			default:
+				port = "80"
+			}
+		}
+		connectAddr = net.JoinHostPort(connectAddr, port)
+	}
+
+	c.log.Infof("connect-addr override: TCP connection will go to %s", connectAddr)
+	addr := connectAddr
+	return &websocket.Dialer{
+		Proxy:            websocket.DefaultDialer.Proxy,
+		HandshakeTimeout: websocket.DefaultDialer.HandshakeTimeout,
+		NetDialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, addr)
+		},
 	}
 }
 
@@ -333,6 +373,8 @@ func (c *Client) handleControl(cf protocol.ControlFrame) {
 		c.closeLocalConn(cf.StreamID)
 	case protocol.FrameRegisterAck:
 		c.setLastSessionID(cf.SessionID)
+		c.log.Infof("connected to server: server=%s client_id=%s target=%s session=%s",
+			c.cfg.ServerURL, c.cfg.ClientID, c.cfg.LocalTarget, cf.SessionID)
 	case protocol.FrameHeartbeat:
 		_ = c.sendControl(protocol.ControlFrame{Type: protocol.FrameHeartbeatAck})
 	case protocol.FrameHeartbeatAck:

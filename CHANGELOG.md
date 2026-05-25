@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/splattner/burrow/compare/v0.4.0...v0.4.1) (2026-05-25)
+
+
+### Bug Fixes
+
+* use same port as the client target port, and fix correct port ([#49](https://github.com/splattner/burrow/issues/49)) ([d47be89](https://github.com/splattner/burrow/commit/d47be89975a5306caf8d755bf11d8f5c3545a514))
+
 ## [0.4.0](https://github.com/splattner/burrow/compare/v0.3.0...v0.4.0) (2026-05-24)
 
 

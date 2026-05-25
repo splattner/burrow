@@ -96,7 +96,7 @@ func (sess *session) enqueue(payload []byte) error {
 		return errNoActiveClient
 	}
 
-	ok, full := trySend(send, payload)
+	ok, full := safeSend(send, payload)
 	if !ok {
 		return errNoActiveClient
 	}

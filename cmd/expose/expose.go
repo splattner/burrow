@@ -136,6 +136,12 @@ func buildConfig(cmd *cobra.Command) (*exposepkg.Config, error) {
 	namespace, _ := flags.GetString("namespace")
 	hostname, _ := flags.GetString("hostname")
 	serviceType, _ := flags.GetString("service-type")
+	switch serviceType {
+	case "", "auto", "ClusterIP", "NodePort", "LoadBalancer", "None":
+		// valid
+	default:
+		return nil, fmt.Errorf("invalid --service-type %q: must be one of auto, ClusterIP, NodePort, LoadBalancer, None", serviceType)
+	}
 	connectAddr, _ := flags.GetString("connect-addr")
 	tlsSecret, _ := flags.GetString("tls-secret")
 	ingressClass, _ := flags.GetString("ingress-class")

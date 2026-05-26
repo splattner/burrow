@@ -55,8 +55,9 @@ type clientState struct {
 }
 
 type Reconciler struct {
-	namespace string
-	client    kubernetes.Interface
+	namespace   string
+	podSelector map[string]string
+	client      kubernetes.Interface
 
 	mu       sync.RWMutex
 	services map[string]ServiceRecord
@@ -64,22 +65,24 @@ type Reconciler struct {
 }
 
 func NewReconciler(namespace string) *Reconciler {
-	return NewReconcilerWithOptions(namespace, nil)
+	return NewReconcilerWithOptions(namespace, nil, "")
 }
 
 // NewReconcilerWithOptions creates a Reconciler with optional Kubernetes API access.
-func NewReconcilerWithOptions(namespace string, enableKubeAPI *bool) *Reconciler {
+func NewReconcilerWithOptions(namespace string, enableKubeAPI *bool, podSelector string) *Reconciler {
 	if strings.TrimSpace(namespace) == "" {
 		namespace = "default"
 	}
 	client, _ := newKubeClient(enableKubeAPI)
-	return NewReconcilerWithClient(namespace, client)
+	r := NewReconcilerWithClient(namespace, client)
+	r.podSelector = parsePodSelector(podSelector)
+	return r
 }
 
 // NewReconcilerWithBridge is kept for backward compatibility; the bridgeAddr
 // parameter is ignored — bridge ports are now passed per EnsureClientService call.
 func NewReconcilerWithBridge(namespace, _ string) *Reconciler {
-	return NewReconcilerWithOptions(namespace, nil)
+	return NewReconcilerWithOptions(namespace, nil, "")
 }
 
 func NewReconcilerWithClient(namespace string, client kubernetes.Interface) *Reconciler {
@@ -280,7 +283,7 @@ func (r *Reconciler) applyServiceRecord(ctx context.Context, record ServiceRecor
 			return fmt.Errorf("get service %s: %w", record.Name, err)
 		}
 
-		_, createErr := svcClient.Create(ctx, buildService(record, bridgePort), metav1.CreateOptions{})
+		_, createErr := svcClient.Create(ctx, buildService(record, bridgePort, r.podSelector), metav1.CreateOptions{})
 		if createErr != nil {
 			if !apierrors.IsAlreadyExists(createErr) {
 				return fmt.Errorf("create service %s: %w", record.Name, createErr)
@@ -295,7 +298,7 @@ func (r *Reconciler) applyServiceRecord(ctx context.Context, record ServiceRecor
 		}
 	}
 
-	desired := buildService(record, bridgePort)
+	desired := buildService(record, bridgePort, r.podSelector)
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		latest, getErr := svcClient.Get(ctx, existing.Name, metav1.GetOptions{})
 		if getErr != nil {
@@ -326,11 +329,14 @@ func targetPortFromAddress(addr string) int32 {
 	return int32(port)
 }
 
-func buildService(record ServiceRecord, bridgePort int32) *corev1.Service {
+func buildService(record ServiceRecord, bridgePort int32, podSelector map[string]string) *corev1.Service {
 	svcPort := targetPortFromAddress(record.Target)
 	targetPort := bridgePort
 	if targetPort <= 0 {
 		targetPort = svcPort
+	}
+	if len(podSelector) == 0 {
+		podSelector = map[string]string{"app": "burrow-server"}
 	}
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -340,10 +346,8 @@ func buildService(record ServiceRecord, bridgePort int32) *corev1.Service {
 			Annotations: copyMap(record.Annotations),
 		},
 		Spec: corev1.ServiceSpec{
-			Type: corev1.ServiceTypeClusterIP,
-			Selector: map[string]string{
-				"app": "burrow-server",
-			},
+			Type:     corev1.ServiceTypeClusterIP,
+			Selector: podSelector,
 			Ports: []corev1.ServicePort{
 				{
 					Name:       defaultServicePortName,
@@ -354,6 +358,32 @@ func buildService(record ServiceRecord, bridgePort int32) *corev1.Service {
 			},
 		},
 	}
+}
+
+// parsePodSelector parses a comma-separated "key=value" string into a label
+// selector map. Returns {"app": "burrow-server"} when the input is empty,
+// preserving backward compatibility with the static manifests deployment.
+func parsePodSelector(s string) map[string]string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return map[string]string{"app": "burrow-server"}
+	}
+	result := make(map[string]string)
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		idx := strings.IndexByte(part, '=')
+		if idx < 0 {
+			continue
+		}
+		result[strings.TrimSpace(part[:idx])] = strings.TrimSpace(part[idx+1:])
+	}
+	if len(result) == 0 {
+		return map[string]string{"app": "burrow-server"}
+	}
+	return result
 }
 
 func newKubeClient(explicitEnable *bool) (kubernetes.Interface, error) {

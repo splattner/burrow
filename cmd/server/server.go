@@ -57,6 +57,7 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 	flags.String("tls-key", "", "Path to TLS private key PEM file; enables server-side TLS when set together with --tls-cert")
 	flags.String("bridge-host", "", "Host to bind per-client bridge listeners on (e.g. 0.0.0.0 or 127.0.0.1). Each client gets a random port. Empty disables bridging.")
 	flags.String("enable-kube-api", "", "Enable Kubernetes Service API reconciliation (true|false, empty=auto)")
+	flags.String("bridge-pod-selector", "", "Label selector for the server Pod used in per-client bridge Services (key=value,...). Defaults to app=burrow-server when empty.")
 	flags.String("namespace", "default", "Namespace for service reconciliation")
 	flags.String("sweep-interval", "1m", "Periodic stale-service sweep interval")
 	flags.String("stale-service-age", "10m", "Max disconnected age before service cleanup")
@@ -78,6 +79,7 @@ func NewCommand(ctx context.Context, v *viper.Viper) *cobra.Command {
 		"tls-key",
 		"bridge-host",
 		"enable-kube-api",
+		"bridge-pod-selector",
 		"namespace",
 		"sweep-interval",
 		"stale-service-age",

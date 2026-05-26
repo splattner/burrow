@@ -64,7 +64,7 @@ func New(cfg config.Config, logger *logrus.Logger) *Server {
 	return &Server{
 		cfg:       cfg,
 		log:       logger,
-		kube:      kube.NewReconcilerWithOptions(cfg.Namespace, cfg.EnableKubeAPI),
+		kube:      kube.NewReconcilerWithOptions(cfg.Namespace, cfg.EnableKubeAPI, cfg.BridgePodSelector),
 		metrics:   metrics.New(),
 		auth:      verifier,
 		authErr:   authErr,

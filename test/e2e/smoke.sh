@@ -7,12 +7,20 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # Dependency checks
 # ---------------------------------------------------------------------------
 
-for cmd in python3 curl nc; do
+for cmd in python3 curl nc go; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "$cmd is required for e2e smoke tests" >&2
     exit 1
   fi
 done
+
+# ---------------------------------------------------------------------------
+# Build binary (avoids cold-compile timeouts during health/readiness waits)
+# ---------------------------------------------------------------------------
+
+BURROW_BIN="${ROOT_DIR}/bin/burrow-e2e"
+echo "[e2e] building burrow binary"
+(cd "$ROOT_DIR" && go build -o "$BURROW_BIN" ./cmd/root)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -246,7 +254,6 @@ start_client() {
   local token="$4"
   local log_suffix="${5:-$client_id}"
   (
-    cd "$ROOT_DIR"
     BURROW_JWT_ALG="HS256" \
     BURROW_JWT_HMAC_SECRET="$JWT_SECRET" \
     BURROW_JWT_ISSUER="$JWT_ISSUER" \
@@ -255,7 +262,7 @@ start_client() {
     BURROW_SERVER_URL="$server_url" \
     BURROW_CLIENT_ID="$client_id" \
     BURROW_LOCAL_TARGET="$local_target" \
-    exec go run ./cmd/root client
+    exec "$BURROW_BIN" client
   ) >"/tmp/burrow-e2e-client-${log_suffix}.log" 2>&1 &
   echo $!
 }
@@ -272,6 +279,7 @@ cleanup() {
   [[ -n "${ECHO_PID:-}"     ]] && kill "$ECHO_PID"  >/dev/null 2>&1 || true
   [[ -n "${ECHO_B_PID:-}"   ]] && kill "$ECHO_B_PID" >/dev/null 2>&1 || true
   wait >/dev/null 2>&1 || true
+  rm -f "$BURROW_BIN" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -323,7 +331,6 @@ wait_for_tcp 127.0.0.1 "$TARGET_PORT_B" 80 || { echo "[e2e] echo server B did no
 
 echo "[e2e] starting tunnel server on ${SERVER_ADDR} (bridge bind ${BRIDGE_BIND})"
 (
-  cd "$ROOT_DIR"
   BURROW_JWT_ALG="HS256" \
   BURROW_JWT_HMAC_SECRET="$JWT_SECRET" \
   BURROW_JWT_ISSUER="$JWT_ISSUER" \
@@ -331,7 +338,7 @@ echo "[e2e] starting tunnel server on ${SERVER_ADDR} (bridge bind ${BRIDGE_BIND}
   BURROW_SERVER_ADDR="$SERVER_ADDR" \
   BURROW_BRIDGE_HOST="$BRIDGE_BIND" \
   BURROW_ENABLE_CLIENT_API="true" \
-  exec go run ./cmd/root server
+  exec "$BURROW_BIN" server
 ) >/tmp/burrow-e2e-server.log 2>&1 &
 SERVER_PID=$!
 

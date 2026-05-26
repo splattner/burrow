@@ -34,6 +34,7 @@ type Config struct {
 	ClientID           string
 	LocalTarget        string
 	Namespace          string
+	BridgePodSelector  string
 	LogLevel           string
 	HeartbeatInterval  time.Duration
 	HeartbeatTimeout   time.Duration
@@ -122,6 +123,7 @@ func LoadFromViper(v *viper.Viper) (Config, error) {
 		ClientID:           strings.TrimSpace(v.GetString("client-id")),
 		LocalTarget:        strings.TrimSpace(v.GetString("local-target")),
 		Namespace:          fallbackString(v.GetString("namespace"), "default"),
+		BridgePodSelector:  strings.TrimSpace(v.GetString("bridge-pod-selector")),
 		LogLevel:           fallbackString(v.GetString("log-level"), "info"),
 		HeartbeatInterval:  heartbeatInterval,
 		HeartbeatTimeout:   heartbeatTimeout,

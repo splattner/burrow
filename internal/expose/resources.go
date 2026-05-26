@@ -129,6 +129,11 @@ func (c *Config) buildDeployment() (*appsv1.Deployment, error) {
 									},
 								},
 								{Name: "BURROW_ENABLE_KUBE_API", Value: "true"},
+							// Scope the per-client bridge Services to THIS server Pod only.
+							// Without this the reconciler defaults to app=burrow-server, which
+							// does not match pods created by expose (they carry
+							// app.kubernetes.io/name labels, not app=burrow-server).
+							{Name: "BURROW_BRIDGE_POD_SELECTOR", Value: "app.kubernetes.io/name=" + c.ResourceName()},
 							},
 							Ports: []corev1.ContainerPort{
 								{Name: "http", ContainerPort: serverPort, Protocol: corev1.ProtocolTCP},

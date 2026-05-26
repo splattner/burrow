@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/splattner/burrow/compare/v0.5.0...v0.5.1) (2026-05-26)
+
+
+### Bug Fixes
+
+* label Selector in svc wrong when using expose ([#55](https://github.com/splattner/burrow/issues/55)) ([a8ca7e3](https://github.com/splattner/burrow/commit/a8ca7e3cf0afad65f12626e230831eb642451f70))
+
 ## [0.5.0](https://github.com/splattner/burrow/compare/v0.4.1...v0.5.0) (2026-05-25)
 
 

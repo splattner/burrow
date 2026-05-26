@@ -21,6 +21,7 @@ The server optionally manages Kubernetes `Service` objects automatically — one
 - [Deploying to Kubernetes](#deploying-to-kubernetes)
 - [Running the client](#running-the-client)
 - [Expose command](#expose-command)
+- [Running expose as a systemd service](#running-expose-as-a-systemd-service)
 - [Configuration reference](#configuration-reference)
 - [Authentication](#authentication)
 - [Building from source](#building-from-source)
@@ -268,6 +269,81 @@ burrow expose --client-id api --local-target 127.0.0.1:8080 \
 | `--patch-deployment` | — | JSON strategic merge patch for the Deployment |
 | `--patch-service` | — | JSON strategic merge patch for the Service |
 | `--patch-ingress` | — | JSON strategic merge patch for the Ingress |
+
+---
+
+## Running expose as a systemd service
+
+For a persistent tunnel that survives reboots and crashes, run `burrow expose` as a systemd service. The recommended pattern uses `--keep` so that Kubernetes resources are preserved across restarts, and `--reuse` so that subsequent starts reconnect without re-provisioning.
+
+**Step 1 — provision Kubernetes resources (once)**
+
+```bash
+burrow expose \
+  --client-id pg \
+  --local-target 127.0.0.1:5432 \
+  --hostname tunnel.example.com \
+  --keep
+```
+
+Once the tunnel is up, press Ctrl-C to disconnect. The Kubernetes resources (Deployment, Service, Ingress, …) remain in the cluster because of `--keep`.
+
+**Step 2 — create the unit file**
+
+Save the following to `/etc/systemd/system/burrow-pg.service`:
+
+```ini
+[Unit]
+Description=Burrow tunnel — pg via tunnel.example.com
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=burrow
+Environment=KUBECONFIG=/etc/burrow/kubeconfig
+ExecStart=/usr/local/bin/burrow expose \
+  --client-id pg \
+  --local-target 127.0.0.1:5432 \
+  --hostname tunnel.example.com \
+  --keep \
+  --reuse
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**Step 3 — enable and start**
+
+```bash
+systemctl daemon-reload
+systemctl enable --now burrow-pg.service
+
+# Check status and follow logs
+systemctl status burrow-pg.service
+journalctl -fu burrow-pg.service
+```
+
+**Teardown**
+
+To stop the tunnel and remove all Kubernetes resources:
+
+```bash
+systemctl stop burrow-pg.service
+burrow expose delete --client-id pg
+systemctl disable burrow-pg.service
+rm /etc/systemd/system/burrow-pg.service
+systemctl daemon-reload
+```
+
+> **Notes:**
+> - Store the kubeconfig for the target cluster at the path given in `Environment=KUBECONFIG=…` and make it readable by the service user. Alternatively, use `--kube-context` to select a named context from the default kubeconfig.
+> - `--keep` prevents resource cleanup on normal exit so `--reuse` can reconnect after a restart without re-provisioning. Remove `--keep` only if you want the Kubernetes resources torn down whenever the service stops.
+> - `Type=exec` (systemd ≥ 240) marks the service ready only after `burrow` has successfully exec'd. Use `Type=simple` on older systems.
+> - The tunnel inherits the token lifetime configured at provisioning time. Because `burrow expose` generates a fresh JWT on each start, token rotation is handled automatically on every `Restart`.
 
 ---
 

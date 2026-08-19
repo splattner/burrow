@@ -1,4 +1,4 @@
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.27
 FROM --platform=$BUILDPLATFORM docker.io/library/golang:${GO_VERSION} AS builder
 WORKDIR /src
 
